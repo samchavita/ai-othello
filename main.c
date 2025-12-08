@@ -1,15 +1,18 @@
+ea30568
+
 #include <stdio.h>
 #include <stdlib.h>
-#include <memory.h>
+#include <string.h>
 #include <time.h>
 #include <assert.h>
 
 #define Board_Size 8
 #define TRUE 1
 #define FALSE 0
+#define MAX_MOVES 200 // Increased from 100 to prevent overflow
 
-// --- Function Prototypes ---
-void Delay(unsigned int mseconds);
+        // --- Function Prototypes ---
+        void Delay(unsigned int mseconds);
 char Load_File(void);
 void Init();
 int Play_a_Move(int x, int y);
@@ -20,9 +23,9 @@ int Check_Cross(int x, int y, int update);
 int Check_Straight_Army(int x, int y, int d, int update);
 int Find_Legal_Moves(int color);
 int Check_EndGame(void);
-int Compute_Grades(int flag); // Used for display/final score only
+int Compute_Grades(int flag);
 
-// --- AI Specific Prototypes (Methodology Changed) ---
+// --- AI Prototypes ---
 void Computer_Think(int *x, int *y);
 int AlphaBeta(int color, int depth, int alpha, int beta, int maximizingPlayer);
 int Eval_Board(int my_color);
@@ -34,7 +37,7 @@ int Winner;
 int Now_Board[Board_Size][Board_Size];
 int Legal_Moves[Board_Size][Board_Size];
 int HandNumber;
-int sequence[100];
+int sequence[MAX_MOVES]; // Increased size
 
 int Black_Count, White_Count;
 int Turn = 0;           // 0 is black or 1 is white
@@ -47,8 +50,7 @@ int Think_Time = 0, Total_Time = 0;
 int search_deep = 6;
 int resultX, resultY;
 
-// IMPROVEMENT 1: Positional Strategy Weights
-// High positive for corners, negative for 'X' and 'C' squares near corners
+// Positional Weights (Corner = Good, X-square = Bad)
 int board_weight[8][8] = {
     {100, -20, 10, 5, 5, 10, -20, 100},
     {-20, -50, -2, -2, -2, -2, -50, -20},
@@ -61,9 +63,9 @@ int board_weight[8][8] = {
 
 typedef struct
 {
-    int x;
-    int y;
-    int score; // Used for move ordering
+    char x; // Changed to char to save stack space (1 byte vs 4)
+    char y;
+    short score; // Changed to short
 } Move;
 
 //---------------------------------------------------------------------------
@@ -91,7 +93,7 @@ int main(int argc, char *argv[])
     else
     {
         printf("Computer take?(B/W/All/File play as first/file play as Second/Load and play): ");
-        scanf("%c", &compcolor);
+        scanf(" %c", &compcolor); // Added space to consume newline
     }
 
     Show_Board_and_Set_Legal_Moves();
@@ -104,7 +106,6 @@ int main(int argc, char *argv[])
         Computer_Think(&rx, &ry);
         printf("Computer played %c%d\n", rx + 97, ry + 1);
         Play_a_Move(rx, ry);
-
         Show_Board_and_Set_Legal_Moves();
     }
 
@@ -142,58 +143,67 @@ int main(int argc, char *argv[])
             if (compcolor == 'F' || compcolor == 'S')
             {
                 fp = fopen("of.txt", "r");
-                fscanf(fp, "%d", &n);
-                char tc[10];
-                if (compcolor == 'F')
+                if (fp)
                 {
-                    if (n % 2 == 0)
+                    fscanf(fp, "%d", &n);
+                    char tc[10];
+                    if (compcolor == 'F')
                     {
-                        while ((fscanf(fp, "%s", tc)) != EOF)
+                        if (n % 2 == 0)
                         {
-                            c[0] = tc[0];
-                            c[1] = tc[1];
-                        }
-                        fclose(fp);
+                            while ((fscanf(fp, "%s", tc)) != EOF)
+                            {
+                                c[0] = tc[0];
+                                c[1] = tc[1];
+                            }
+                            fclose(fp);
 
-                        if (c[0] == 'w')
-                            return 0;
-                        if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
+                            if (c[0] == 'w')
+                                return 0;
+                            if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
+                            {
+                                printf("%s is wrong F\n", c);
+                                continue;
+                            }
+                        }
+                        else
                         {
-                            printf("%s is wrong F\n", c);
+                            fclose(fp);
+                            Delay(100);
                             continue;
                         }
                     }
                     else
                     {
-                        fclose(fp);
-                        Delay(100);
-                        continue;
+                        if (n % 2 == 1)
+                        {
+                            while ((fscanf(fp, "%s", tc)) != EOF)
+                            {
+                                c[0] = tc[0];
+                                c[1] = tc[1];
+                            }
+                            fclose(fp);
+                            if (c[0] == 'w')
+                                return 0;
+                            if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
+                            {
+                                printf("%s is wrong S\n", c);
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            fclose(fp);
+                            Delay(100);
+                            continue;
+                        }
                     }
                 }
                 else
                 {
-                    if (n % 2 == 1)
-                    {
-                        while ((fscanf(fp, "%s", tc)) != EOF)
-                        {
-                            c[0] = tc[0];
-                            c[1] = tc[1];
-                        }
-                        fclose(fp);
-                        if (c[0] == 'w')
-                            return 0;
-                        if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
-                        {
-                            printf("%s is wrong S\n", c);
-                            continue;
-                        }
-                    }
-                    else
-                    {
-                        fclose(fp);
-                        Delay(100);
-                        continue;
-                    }
+                    // File open failed, wait and retry
+                    Delay(100);
+                    continue;
                 }
             }
 
@@ -238,7 +248,6 @@ int main(int argc, char *argv[])
                 printf("#%d, %c%d is a Wrong move\n", HandNumber, c[0], column_input + 1);
                 return 0;
             }
-
             else
                 break;
         }
@@ -278,7 +287,11 @@ char Load_File(void)
     int row_input, column_input, n;
 
     fp = fopen("of.txt", "r");
-    assert(fp != NULL);
+    if (fp == NULL)
+    {
+        printf("Error: Could not open of.txt for loading.\n");
+        return 'W'; // Default fallback
+    }
 
     fscanf(fp, "%d", &n);
 
@@ -306,7 +319,7 @@ void Init()
     Now_Board[3][4] = Now_Board[4][3] = 1; // black, light
 
     HandNumber = 0;
-    memset(sequence, -1, sizeof(int) * 100);
+    memset(sequence, -1, sizeof(int) * MAX_MOVES);
     Turn = 0;
 
     LastX = LastY = -1;
@@ -321,15 +334,23 @@ int Play_a_Move(int x, int y)
 
     if (x == -1 && y == -1)
     {
+        // Safe File I/O
         fp = fopen("of.txt", "r+");
-        fprintf(fp, "%2d\n", HandNumber + 1);
-        fclose(fp);
+        if (fp)
+        {
+            fprintf(fp, "%2d\n", HandNumber + 1);
+            fclose(fp);
+        }
 
         fp = fopen("of.txt", "a");
-        fprintf(fp, "p9\n");
-        fclose(fp);
+        if (fp)
+        {
+            fprintf(fp, "p9\n");
+            fclose(fp);
+        }
 
-        sequence[HandNumber] = -1;
+        if (HandNumber < MAX_MOVES)
+            sequence[HandNumber] = -1;
         HandNumber++;
         Turn = 1 - Turn;
         return 1;
@@ -358,20 +379,36 @@ int Put_a_Stone(int x, int y)
 
     if (Now_Board[x][y] == 0)
     {
-        sequence[HandNumber] = Turn;
+        if (HandNumber < MAX_MOVES)
+            sequence[HandNumber] = Turn;
+
+        // SAFE File I/O
         if (HandNumber == 0)
             fp = fopen("of.txt", "w");
         else
             fp = fopen("of.txt", "r+");
-        fprintf(fp, "%2d\n", HandNumber + 1);
+
+        if (fp != NULL)
+        {
+            fprintf(fp, "%2d\n", HandNumber + 1);
+            fclose(fp);
+        }
+        else
+        {
+            printf("Warning: Could not write to of.txt\n");
+        }
+
         HandNumber++;
-        fclose(fp);
 
         Now_Board[x][y] = Stones[Turn];
+
         fp = fopen("of.txt", "a");
-        fprintf(fp, "%c%d\n", x + 97, y + 1);
-        ;
-        fclose(fp);
+        if (fp != NULL)
+        {
+            fprintf(fp, "%c%d\n", x + 97, y + 1);
+            ;
+            fclose(fp);
+        }
 
         LastX = x;
         LastY = y;
@@ -515,7 +552,6 @@ int In_Board(int x, int y)
         return FALSE;
 }
 //---------------------------------------------------------------------------
-// Used for display and game end, uses old count style
 int Compute_Grades(int flag)
 {
     int i, j;
@@ -539,15 +575,11 @@ int Compute_Grades(int flag)
     return (B - W);
 }
 
-// IMPROVEMENT 2: Advanced Board Evaluation
-// Calculates score based on Position Weights + Mobility
 int Eval_Board(int my_color)
 {
     int i, j, score = 0;
-    int my_moves = 0, opp_moves = 0;
     int opp_color = (my_color == 1) ? 2 : 1;
 
-    // 1. Position Weights
     for (i = 0; i < Board_Size; i++)
     {
         for (j = 0; j < Board_Size; j++)
@@ -558,17 +590,6 @@ int Eval_Board(int my_color)
                 score -= board_weight[i][j];
         }
     }
-
-    // 2. Mobility (Number of legal moves available)
-    // Note: Find_Legal_Moves writes to the global Legal_Moves array,
-    // so we need to be careful inside recursive search.
-    // However, Eval_Board is usually leaf, so we can check connectivity.
-    // Since Check_Cross is expensive, we do a simplified check or skip strict mobility
-    // in deep search for performance, but here is a simple implementation:
-
-    // (Simpler mobility proxy: just counting empty squares adjacent to opponent might be faster,
-    // but let's stick to the structure).
-
     return score;
 }
 
@@ -586,38 +607,41 @@ int Check_EndGame(void)
         fp = fopen("of.txt", "a");
         Total_Time = clock() - Total_Time;
 
-        if (HandNumber % 2 == 1)
+        if (fp)
         {
-            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
-            fprintf(fp, "Black used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
-        }
-        else
-        {
-            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
-            fprintf(fp, "White used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
-        }
+            if (HandNumber % 2 == 1)
+            {
+                fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
+                fprintf(fp, "Black used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
+            }
+            else
+            {
+                fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
+                fprintf(fp, "White used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
+            }
 
-        if (Black_Count > White_Count)
-        {
-            printf("Black(F) Win!\n");
-            fprintf(fp, "wB%d\n", Black_Count - White_Count);
-            if (Winner == 0)
-                Winner = 1;
+            if (Black_Count > White_Count)
+            {
+                printf("Black(F) Win!\n");
+                fprintf(fp, "wB%d\n", Black_Count - White_Count);
+                if (Winner == 0)
+                    Winner = 1;
+            }
+            else if (Black_Count < White_Count)
+            {
+                printf("White(S) Win!\n");
+                fprintf(fp, "wW%d\n", White_Count - Black_Count);
+                if (Winner == 0)
+                    Winner = 2;
+            }
+            else
+            {
+                printf("Draw\n");
+                fprintf(fp, "wZ%d\n", White_Count - Black_Count);
+                Winner = 0;
+            }
+            fclose(fp);
         }
-        else if (Black_Count < White_Count)
-        {
-            printf("White(S) Win!\n");
-            fprintf(fp, "wW%d\n", White_Count - Black_Count);
-            if (Winner == 0)
-                Winner = 2;
-        }
-        else
-        {
-            printf("Draw\n");
-            fprintf(fp, "wZ%d\n", White_Count - Black_Count);
-            Winner = 0;
-        }
-        fclose(fp);
         Show_Board_and_Set_Legal_Moves();
         printf("Game is over");
         return TRUE;
@@ -625,14 +649,12 @@ int Check_EndGame(void)
     return FALSE;
 }
 
-// --- IMPROVED AI ENGINE START ---
+// --- IMPROVED AI ENGINE ---
 
-// Helper function to sort moves for Alpha-Beta pruning
 int CompareMoves(const void *a, const void *b)
 {
     Move *mA = (Move *)a;
     Move *mB = (Move *)b;
-    // Sort Descending
     return (mB->score - mA->score);
 }
 
@@ -641,11 +663,10 @@ void Computer_Think(int *x, int *y)
     time_t clockBegin, clockEnd, tinterval;
     clockBegin = clock();
 
-    resultX = resultY = -1;
+    resultX = -1;
+    resultY = -1;
     Search_Counter = 0;
 
-    // Call the new unified AlphaBeta search
-    // We want to maximize the score for the current Turn
     AlphaBeta(Turn, search_deep, -999999, 999999, 1);
 
     clockEnd = clock();
@@ -653,7 +674,7 @@ void Computer_Think(int *x, int *y)
     Think_Time += tinterval;
 
     if (tinterval < 200)
-        Delay(200 - Think_Time); // Optional delay for UX
+        Delay(200 - Think_Time);
     printf("used thinking time= %d min. %d.%d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000, (Think_Time % 60000) % 1000);
 
     if (resultX != -1 && resultY != -1)
@@ -663,7 +684,8 @@ void Computer_Think(int *x, int *y)
     }
     else
     {
-        *x = *y = -1;
+        *x = -1;
+        *y = -1;
     }
 }
 
@@ -671,36 +693,19 @@ int AlphaBeta(int myturn, int depth, int alpha, int beta, int maximizingPlayer)
 {
     int i, j, k;
 
-    // 1. Base Case: Max depth reached
     if (depth == 0)
-    {
-        // Evaluate board relative to the original player who called Computer_Think
-        // If myturn is the original Turn, we want positive score.
-        // We evaluate based on Stones[Turn] perspective.
         return Eval_Board(Stones[Turn]);
-    }
 
-    // 2. Generate Moves
     int moveCount = Find_Legal_Moves(Stones[myturn]);
-
-    // 3. Check Game Over or Pass
     if (moveCount == 0)
-    {
-        // Check if opponent also has no moves (Game Over)
-        // For simplicity in recursion, we assume pass if game not over.
-        // If it's a pass, we recurse with same board, swapped turn, decrement depth
-        // But preventing infinite loop requires checking if previous was also pass.
-        // For this simple implementation, if we can't move, we return heuristic.
         return Eval_Board(Stones[Turn]);
-    }
 
-    // 4. Store moves in array for sorting (Move Ordering)
     Move moves[64];
     int mIdx = 0;
     int saved_board[Board_Size][Board_Size];
     int saved_legal[Board_Size][Board_Size];
 
-    // Save state before modifying for move generation loop
+    // Save state
     memcpy(saved_legal, Legal_Moves, sizeof(int) * Board_Size * Board_Size);
 
     for (i = 0; i < Board_Size; i++)
@@ -711,17 +716,13 @@ int AlphaBeta(int myturn, int depth, int alpha, int beta, int maximizingPlayer)
             {
                 moves[mIdx].x = i;
                 moves[mIdx].y = j;
-                // Heuristic for sorting: Try corners first, avoid X-squares
                 moves[mIdx].score = board_weight[i][j];
                 mIdx++;
             }
         }
     }
 
-    // Sort moves to optimize Alpha-Beta pruning
     qsort(moves, mIdx, sizeof(Move), CompareMoves);
-
-    // Save board state
     memcpy(saved_board, Now_Board, sizeof(int) * Board_Size * Board_Size);
 
     int bestValue;
@@ -734,20 +735,16 @@ int AlphaBeta(int myturn, int depth, int alpha, int beta, int maximizingPlayer)
             int cx = moves[k].x;
             int cy = moves[k].y;
 
-            // Apply Move
             Now_Board[cx][cy] = Stones[myturn];
             Check_Cross(cx, cy, TRUE);
 
-            // Recurse
             int val = AlphaBeta(1 - myturn, depth - 1, alpha, beta, 0);
 
-            // Undo Move
             memcpy(Now_Board, saved_board, sizeof(int) * Board_Size * Board_Size);
 
             if (val > bestValue)
             {
                 bestValue = val;
-                // If this is the root call (depth == search_deep), store the best move
                 if (depth == search_deep)
                 {
                     resultX = cx;
@@ -757,7 +754,7 @@ int AlphaBeta(int myturn, int depth, int alpha, int beta, int maximizingPlayer)
             if (bestValue > alpha)
                 alpha = bestValue;
             if (beta <= alpha)
-                break; // Beta Cutoff
+                break;
         }
         return bestValue;
     }
@@ -769,14 +766,11 @@ int AlphaBeta(int myturn, int depth, int alpha, int beta, int maximizingPlayer)
             int cx = moves[k].x;
             int cy = moves[k].y;
 
-            // Apply Move
             Now_Board[cx][cy] = Stones[myturn];
             Check_Cross(cx, cy, TRUE);
 
-            // Recurse
             int val = AlphaBeta(1 - myturn, depth - 1, alpha, beta, 1);
 
-            // Undo Move
             memcpy(Now_Board, saved_board, sizeof(int) * Board_Size * Board_Size);
 
             if (val < bestValue)
@@ -784,7 +778,7 @@ int AlphaBeta(int myturn, int depth, int alpha, int beta, int maximizingPlayer)
             if (bestValue < beta)
                 beta = bestValue;
             if (beta <= alpha)
-                break; // Alpha Cutoff
+                break;
         }
         return bestValue;
     }
