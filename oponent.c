@@ -879,5 +879,3 @@ int search_next(int x, int y, int myturn, int mylevel, int alpha, int beta)
     }
 }
 //---------------------------------------------------------------------------
-
-// let's take a moment to analyze what we are doing

@@ -16,12 +16,6 @@
  *
  * Usage:
  *   ./Ot8b            # interactive (menu)
- *   ./Ot8b F [depth]  # play as First (Black)
- *   ./Ot8b S [depth]  # play as Second (White)
- *   ./Ot8b A [depth]  # auto play both
- *   ./Ot8b B          # Human vs Computer (Human Black)
- *   ./Ot8b W          # Human vs Computer (Human White)
- *   ./Ot8b L          # Load game from of.txt and continue
  *
  * of.txt format (read/write):
  * Line 1: move count (integer)
@@ -704,6 +698,10 @@ int append_move_to_oftxt(GameState *g, const char *move_str)
                 // Skip lines that start with 'w' (end markers)
                 if (buf[0] == 'w')
                     break;
+                
+                // Skip lines that are purely numeric (corrupted count lines)
+                if (buf[0] >= '0' && buf[0] <= '9' && buf[1] >= '0' && buf[1] <= '9' || buf[0] == ' ' && buf[1] >= '0' && buf[1] <= '9')
+                    continue;
                     
                 strncpy(moves[n], buf, 7);
                 moves[n][7] = 0;
@@ -728,7 +726,7 @@ int append_move_to_oftxt(GameState *g, const char *move_str)
     if (!fp)
         return 0;
     
-    fprintf(fp, "%2d\n", n);
+    fprintf(fp, "%2d", n);
     for (int i = 0; i < n; i++)
     {
         fprintf(fp, "%s\n", moves[i]);
@@ -768,7 +766,10 @@ int choose_best_move(GameState *g, int depth, int *out_x, int *out_y)
     int n;
     int flipinfo[MAX_LEGAL][MAX_FLIPS];
     int flipcounts[MAX_LEGAL];
+    printf("generating moves...\n");
     generate_moves(g, color, moves, &n, flipinfo, flipcounts);
+
+    printf("done\n");
     if (n == 0)
     {
         *out_x = -1;
@@ -777,7 +778,10 @@ int choose_best_move(GameState *g, int depth, int *out_x, int *out_y)
     }
     Move best;
     // We use negamax from current node with provided depth
+
+    printf("Getting negamax\n");
     int val = negamax(g, depth, -INF, INF, color, &best);
+    printf("done\n");
     if (best.x == -1)
     {
         // fallback choose first
@@ -792,111 +796,20 @@ int choose_best_move(GameState *g, int depth, int *out_x, int *out_y)
     return 1;
 }
 
-/* Human input helper */
-int get_human_move(GameState *g, int *rx, int *ry)
-{
-    char s[16];
-    printf("Enter move (e.g. c4) or 'p' to pass: ");
-    if (!fgets(s, sizeof(s), stdin))
-        return 0;
-    // trim newline
-    char *nl = strchr(s, '\n');
-    if (nl)
-        *nl = 0;
-    if (s[0] == 'p' || s[0] == 'P')
-    {
-        *rx = -1;
-        *ry = -1;
-        return 1;
-    }
-    int x, y;
-    if (!notation_to_coords(s, &x, &y))
-    {
-        printf("Invalid notation.\n");
-        return 0;
-    }
-    // check legality
-    Move flips[MAX_FLIPS];
-    int fc = 0;
-    int color = color_of_turn(g);
-    if (!is_legal_move(g, color, x, y, flips, &fc))
-    {
-        printf("Illegal move.\n");
-        return 0;
-    }
-    *rx = x;
-    *ry = y;
-    return 1;
-}
-
-void print_help()
-{
-    printf("Ot8b usage:\n");
-    printf(" ./Ot8b F          - Tournament: play as First (Black)\n");
-    printf(" ./Ot8b S          - Tournament: play as Second (White)\n");
-    printf("\nNote: For tournament (F/S), depth hardcoded at 8.\n");
-    printf("      Referee calls: run.exe Ot8b <F|S> <num_matches>\n");
-}
-
 /* MAIN */
 int main(int argc, char *argv[])
 {
     GameState g;
     init_board(&g);
 
-    int modeTournament = 0;
-    int depth = 8; // default search depth (hardcoded for tournament performance)
-    
-    if (argc == 1)
-    {
-        print_help();
-        return 0;
-    }
-    
-    // Parse command line arguments
+    int modeTournament = 1;
+    int depth = 10; // default search depth (hardcoded for tournament performance)
     char m = argv[1][0];
-    if (m == 'F')
-    {
-        modeTournament = 1;
-        g.turn = 0; /* we play Black/First */
-        printf("Tournament mode: Playing as First (Black), depth=%d\n", depth);
-    }
-    else if (m == 'S')
-    {
-        modeTournament = 1;
-        g.turn = 1; /* we play White/Second */
-        printf("Tournament mode: Playing as Second (White), depth=%d\n", depth);
-    }
-    else
-    {
-        print_help();
-        return 1;
-    }
+
 
     /* if loadOnly or file exists, load */
     char moves[MAX_MOVES][4];
     int moves_n = 0;
-    if (load_game_from_file(&g, moves, &moves_n))
-    {
-        printf("Loaded game with %d moves from of.txt\n", moves_n);
-    }
-    else
-    {
-        // start fresh: we will write initial move count if needed
-        // create file with starting count 1 and no moves (or as initialized)
-        FILE *fp = fopen("of.txt", "r");
-        if (!fp)
-        {
-            fp = fopen("of.txt", "w");
-            if (fp)
-            {
-                fprintf(fp, "%2d\n", 0); // 0 moves
-                fclose(fp);
-            }
-        }
-        else
-            fclose(fp);
-    }
     
     /* Tournament mode (F/S): Wait for opponent moves from of.txt, then make our move */
     if (modeTournament)
@@ -905,38 +818,6 @@ int main(int argc, char *argv[])
         int our_turn_value = we_are_black ? 0 : 1;
         
         printf("Tournament mode: Playing as %s (depth %d)\n", we_are_black ? "Black/First" : "White/Second", depth);
-        
-        // If we're Black/First, start fresh and make opening move
-        if (we_are_black)
-        {
-            // Clear/initialize of.txt for new game
-            FILE *fp = fopen("of.txt", "w");
-            if (fp)
-            {
-                fprintf(fp, "0\n");
-                fclose(fp);
-            }
-            
-            // Reset game state
-            init_board(&g);
-            
-            // Make opening move
-            int color = BLACK;
-            int bx, by;
-            choose_best_move(&g, depth, &bx, &by);
-            if (bx >= 0)
-            {
-                Move flips[MAX_FLIPS];
-                int fc = 0;
-                is_legal_move(&g, color, bx, by, flips, &fc);
-                apply_move_with_flips(&g, color, bx, by, flips, fc);
-                char m[8];
-                coords_to_notation(m, bx, by);
-                append_move_to_oftxt(&g, m);
-                printf("We (Black) play %s\n", m);
-                print_board(&g);
-            }
-        }
         
         // Main tournament loop
         while (!is_game_over(&g))
@@ -956,7 +837,7 @@ int main(int argc, char *argv[])
                 // Delay to avoid busy waiting
                 struct timespec ts;
                 ts.tv_sec = 0;
-                ts.tv_nsec = 100000000; // 100ms
+                ts.tv_nsec = 1; // 100ms
                 nanosleep(&ts, NULL);
                 
                 // Reload game state from file
@@ -982,6 +863,12 @@ int main(int argc, char *argv[])
             
             // Now it's our turn - make our move
             int color = color_of_turn(&g);
+
+            if (color != WHITE) {
+                // printf("checked of.tx but not our turn yet... skipping\n");
+                continue; // safety check
+            }
+
             int moves_avail = count_legal_moves(&g, color);
             
             if (moves_avail == 0)
@@ -995,7 +882,10 @@ int main(int argc, char *argv[])
             }
             
             int bx, by;
+
+            printf("Calculating our move...\n");
             choose_best_move(&g, depth, &bx, &by);
+            printf("Done...\n");
             
             if (bx < 0)
             {
