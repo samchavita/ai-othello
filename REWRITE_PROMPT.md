@@ -32,12 +32,8 @@ Rewrite the Othello AI engine (`Ot8b.c`) from scratch using the most efficient a
 
 ### Tournament Modes
 Support command-line arguments:
-- `Ot8b.exe F [depth]` - Play as First player (Black, move 1)
-- `Ot8b.exe S [depth]` - Play as Second player (White, move 2)
-- `Ot8b.exe A [depth]` - Auto (play both sides, for debugging)
-- `Ot8b.exe B` - Human vs Computer (Human plays Black)
-- `Ot8b.exe W` - Human vs Computer (Human plays White)
-- `Ot8b.exe L` - Load game from `of.txt` and resume
+- `Ot8b.exe F` - Play as First player (Black, move 1)
+- `Ot8b.exe S` - Play as Second player (White, move 2)
 - Default `[depth]` = 6 ply
 
 ### Board Representation
@@ -311,16 +307,8 @@ int main(int argc, char *argv[]);
 
 ```bash
 # Tournament mode (F = First/Black, S = Second/White)
-./Ot8b F 6              # Black, depth 6
-./Ot8b S 8              # White, depth 8
-./Ot8b A 6              # Auto play both (debug)
-
-# Human vs Computer
-./Ot8b B                # Human plays Black
-./Ot8b W                # Human plays White
-
-# Load and resume
-./Ot8b L                # Load of.txt and continue
+./Ot8b F               # Black, depth 6
+./Ot8b S               # White, depth 8
 
 # Default
 ./Ot8b                  # Interactive menu
