@@ -9,66 +9,64 @@
 #define FALSE 0
 
 void Delay(unsigned int mseconds);
-//int Read_File( FILE *p, char *c );//open a file and get the next move, for play by file
-char Load_File( void );//load a file and start a game
+// int Read_File( FILE *p, char *c );//open a file and get the next move, for play by file
+char Load_File(void); // load a file and start a game
 
 void Init();
-int Play_a_Move( int x, int y);
-void  Show_Board_and_Set_Legal_Moves( void );
-int  Put_a_Stone( int x, int y );
+int Play_a_Move(int x, int y);
+void Show_Board_and_Set_Legal_Moves(void);
+int Put_a_Stone(int x, int y);
 
-int  In_Board( int x, int y );
-int  Check_Cross( int x, int y, int update );
-int  Check_Straight_Army( int x, int y, int d, int update );
+int In_Board(int x, int y);
+int Check_Cross(int x, int y, int update);
+int Check_Straight_Army(int x, int y, int d, int update);
 
-int  Find_Legal_Moves(int color);
-int  Check_EndGame( void );
-int  Compute_Grades(int flag);
+int Find_Legal_Moves(int color);
+int Check_EndGame(void);
+int Compute_Grades(int flag);
 
-void Computer_Think( int *x, int *y);
+void Computer_Think(int *x, int *y);
 int Search(int myturn, int mylevel);
 int search_next(int x, int y, int myturn, int mylevel, int alpha, int beta);
-
 
 int Search_Counter;
 int Computer_Take;
 int Winner;
-int Now_Board[ Board_Size ][ Board_Size ];
-//mark the dead stone
-//int Dead_Stone[ Board_Size ][ Board_Size ];
-int Legal_Moves[ Board_Size ][ Board_Size ];
+int Now_Board[Board_Size][Board_Size];
+// mark the dead stone
+// int Dead_Stone[ Board_Size ][ Board_Size ];
+int Legal_Moves[Board_Size][Board_Size];
 int HandNumber;
 int sequence[100];
 
 int Black_Count, White_Count;
-int Turn = 0;// 0 is black or 1 is white
-int Stones[2]= {1,2}; // 1: black, 2: white
+int Turn = 0;           // 0 is black or 1 is white
+int Stones[2] = {1, 2}; // 1: black, 2: white
 int DirX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
 int DirY[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
 
 int LastX, LastY;
-int Think_Time=0, Total_Time=0;
-//int Auto_Check_Dead;
+int Think_Time = 0, Total_Time = 0;
+// int Auto_Check_Dead;
 
 int search_deep = 6;
 
 int alpha_beta_option = TRUE;
 int resultX, resultY;
-//int search_level_now;
+// int search_level_now;
 
-//int board_weight[ Board_Size ][ Board_Size ];
+// int board_weight[ Board_Size ][ Board_Size ];
 int board_weight[8][8] =
-//a, b, c, d, e, f, g,  h
-{
-    {1, 1, 1, 1, 1, 1, 1, 1},//1
-    {1, 1, 1, 1, 1, 1, 1, 1},//2
-    {1, 1, 1, 1, 1, 1, 1, 1},//3
-    {1, 1, 1, 1, 1, 1, 1, 1},//4
-    {1, 1, 1, 1, 1, 1, 1, 1},//5
-    {1, 1, 1, 1, 1, 1, 1, 1},//6
-    {1, 1, 1, 1, 1, 1, 1, 1},//7
-    {1, 1, 1, 1, 1, 1, 1, 1}
-};//8
+    // a, b, c, d, e, f, g,  h
+    {
+        {1, 1, 1, 1, 1, 1, 1, 1},  // 1
+        {1, 1, 1, 1, 1, 1, 1, 1},  // 2
+        {1, 1, 1, 1, 1, 1, 1, 1},  // 3
+        {1, 1, 1, 1, 1, 1, 1, 1},  // 4
+        {1, 1, 1, 1, 1, 1, 1, 1},  // 5
+        {1, 1, 1, 1, 1, 1, 1, 1},  // 6
+        {1, 1, 1, 1, 1, 1, 1, 1},  // 7
+        {1, 1, 1, 1, 1, 1, 1, 1}}; // 8
 
 typedef struct location
 {
@@ -79,98 +77,99 @@ typedef struct location
 
 //---------------------------------------------------------------------------
 
-int main(int argc, char *argv[] )
+int main(int argc, char *argv[])
 {
     char compcolor = 'W', c[10];
-    int column_input, row_input ;
-    int rx, ry, m=0, n;
+    int column_input, row_input;
+    int rx, ry, m = 0, n;
     FILE *fp;
 
     Init();
-//20210529 edit************
-    if ( argc == 3 )
+    // 20210529 edit************
+    if (argc == 3)
     {
-        compcolor = *argv[1] ;
-        if ( atoi(argv[2]) > 0 )
+        compcolor = *argv[1];
+        if (atoi(argv[2]) > 0)
             search_deep = atoi(argv[2]);
         printf("%c, %d\n", compcolor, search_deep);
-//        scanf("%d", n);
+        //        scanf("%d", n);
     }
-    else if ( argc == 2 )
+    else if (argc == 2)
     {
-        compcolor = *argv[1] ;
+        compcolor = *argv[1];
     }
     else
     {
         printf("Computer take?(B/W/All/File play as first/file play as Second/Load and play): ");
         scanf("%c", &compcolor);
     }
-//*******************
+    //*******************
 
     Show_Board_and_Set_Legal_Moves();
 
     if (compcolor == 'L' || compcolor == 'l')
         compcolor = Load_File();
 
-    if ( compcolor == 'B' || compcolor == 'b')
+    if (compcolor == 'B' || compcolor == 'b')
     {
-        Computer_Think( &rx, &ry );
-        printf("Computer played %c%d\n", rx+97, ry+1);
-        Play_a_Move( rx, ry );
+        Computer_Think(&rx, &ry);
+        printf("Computer played %c%d\n", rx + 97, ry + 1);
+        Play_a_Move(rx, ry);
 
         Show_Board_and_Set_Legal_Moves();
     }
 
-    if ( compcolor == 'A' || compcolor == 'a')
-        while ( m++ < 64 )
+    if (compcolor == 'A' || compcolor == 'a')
+        while (m++ < 64)
         {
-            Computer_Think( &rx, &ry );
-            if ( !Play_a_Move( rx, ry ))
+            Computer_Think(&rx, &ry);
+            if (!Play_a_Move(rx, ry))
             {
-                printf("Wrong Computer moves %c%d\n", rx+97, ry+1);
+                printf("Wrong Computer moves %c%d\n", rx + 97, ry + 1);
                 scanf("%d", &n);
                 break;
             }
-            if ( rx == -1 )
+            if (rx == -1)
                 printf("Computer Pass\n");
             else
-                printf("Computer played %c%d\n", rx+97, ry+1);
+                printf("Computer played %c%d\n", rx + 97, ry + 1);
 
-            if ( Check_EndGame() )
+            if (Check_EndGame())
                 return 0;
             Show_Board_and_Set_Legal_Moves();
         }
 
-    if ( compcolor == 'F')
+    if (compcolor == 'F')
     {
         printf("First/Black start!\n");
-        Computer_Think( &rx, &ry );
-        Play_a_Move( rx, ry );
+        Computer_Think(&rx, &ry);
+        Play_a_Move(rx, ry);
     }
 
-    while ( m++ < 64 )
+    while (m++ < 64)
     {
         while (1)
         {
-            if ( compcolor == 'F' || compcolor == 'S' )
+            if (compcolor == 'F' || compcolor == 'S')
             {
-                fp = fopen( "of.txt", "r" );
-                fscanf( fp, "%d", &n );
-                //fclose( fp );
+                fp = fopen("of.txt", "r");
+                fscanf(fp, "%d", &n);
+                // fclose( fp );
                 char tc[10];
-                if (compcolor == 'F' )
+                if (compcolor == 'F')
                 {
-                    if ( n % 2 == 0 )
+                    if (n % 2 == 0)
                     {
-                        while ( (fscanf( fp, "%s", tc ) ) != EOF )
+                        while ((fscanf(fp, "%s", tc)) != EOF)
                         {
                             c[0] = tc[0];
                             c[1] = tc[1];
                         }
                         fclose(fp);
 
-                        if ( c[0] == 'w' ) return 0;
-                        if( c[0] != 'p' && Now_Board[c[0]-97][c[1]-49] != 0)
+                        if (c[0] == 'w')
+                            return 0;
+                        if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
                         {
                             printf("%s is wrong F\n", c);
                             continue;
@@ -185,19 +184,20 @@ int main(int argc, char *argv[] )
                 }
                 else
                 {
-                    if ( n % 2 == 1 )
+                    if (n % 2 == 1)
                     {
-                        while ( (fscanf( fp, "%s", tc ) ) != EOF )
+                        while ((fscanf(fp, "%s", tc)) != EOF)
                         {
                             c[0] = tc[0];
                             c[1] = tc[1];
                         }
                         fclose(fp);
-                        if ( c[0] == 'w' ) return 0;
-                        if( c[0] != 'p' && Now_Board[c[0]-97][c[1]-49] != 0)
+                        if (c[0] == 'w')
+                            return 0;
+                        if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
                         {
-                             printf("%s is wrong S\n", c);
-                             continue;
+                            printf("%s is wrong S\n", c);
+                            continue;
                         }
                     }
                     else
@@ -209,68 +209,69 @@ int main(int argc, char *argv[] )
                 }
             }
 
-            if ( compcolor == 'B' )
+            if (compcolor == 'B')
             {
                 printf("input White move:(a-h 1-8), or PASS\n");
                 scanf("%s", c);
             }
-            else if ( compcolor == 'W' )
+            else if (compcolor == 'W')
             {
                 printf("input Black move:(a-h 1-8), or PASS\n");
                 scanf("%s", c);
             }
 
-            if ( c[0] == 'P' || c[0] == 'p')
+            if (c[0] == 'P' || c[0] == 'p')
                 row_input = column_input = -1;
-            else if ( c[0] == 'M' || c[0] == 'm' )
+            else if (c[0] == 'M' || c[0] == 'm')
             {
-                Computer_Think( &rx, &ry );
-                if ( !Play_a_Move( rx, ry ))
+                Computer_Think(&rx, &ry);
+                if (!Play_a_Move(rx, ry))
                 {
-                    printf("Wrong Computer moves %c%d\n", rx+97, ry+1);
+                    printf("Wrong Computer moves %c%d\n", rx + 97, ry + 1);
                     scanf("%d", &n);
                     break;
                 }
-                if ( rx == -1 )
+                if (rx == -1)
                     printf("Computer Pass");
                 else
-                    printf("Computer played %c%d\n", rx+97, ry+1);
-                if ( Check_EndGame() )
+                    printf("Computer played %c%d\n", rx + 97, ry + 1);
+                if (Check_EndGame())
                     break;
                 Show_Board_and_Set_Legal_Moves();
             }
             else
             {
-                row_input= c[0] - 97;
+                row_input = c[0] - 97;
                 column_input = c[1] - 49;
             }
-//            printf("%d, %d\n", row_input, column_input);
+            //            printf("%d, %d\n", row_input, column_input);
 
-            if ( !Play_a_Move(row_input, column_input) )
+            if (!Play_a_Move(row_input, column_input))
             {
-                printf("#%d, %c%d is a Wrong move\n", HandNumber, c[0], column_input+1);
+                printf("#%d, %c%d is a Wrong move\n", HandNumber, c[0], column_input + 1);
                 return 0;
             }
 
             else
                 break;
         }
-        if ( Check_EndGame() )
-            return 0;;
+        if (Check_EndGame())
+            return 0;
+        ;
         Show_Board_and_Set_Legal_Moves();
 
-        Computer_Think( &rx, &ry );
-        printf("Computer played %c%d\n", rx+97, ry+1);
-        Play_a_Move( rx, ry );
-        if ( Check_EndGame() )
-            return 0;;
+        Computer_Think(&rx, &ry);
+        printf("Computer played %c%d\n", rx + 97, ry + 1);
+        Play_a_Move(rx, ry);
+        if (Check_EndGame())
+            return 0;
+        ;
         Show_Board_and_Set_Legal_Moves();
-
     }
 
     printf("Game is over!!");
     printf("\n%d", argc);
-    if ( argc <= 1 )
+    if (argc <= 1)
         scanf("%d", &n);
 
     return 0;
@@ -279,7 +280,8 @@ int main(int argc, char *argv[] )
 void Delay(unsigned int mseconds)
 {
     clock_t goal = mseconds + clock();
-    while (goal > clock());
+    while (goal > clock())
+        ;
 }
 //---------------------------------------------------------------------------
 /*
@@ -301,28 +303,28 @@ int Read_File( FILE *fp, char *c )
 }*/
 //---------------------------------------------------------------------------
 
-char Load_File( void )
+char Load_File(void)
 {
     FILE *fp;
     char tc[10];
     int row_input, column_input, n;
 
-    fp = fopen( "of.txt", "r" );
-    assert( fp != NULL );
+    fp = fopen("of.txt", "r");
+    assert(fp != NULL);
 
-    fscanf( fp, "%d", &n );
+    fscanf(fp, "%d", &n);
 
-    while ( (fscanf( fp, "%s", tc ) ) != EOF )
+    while ((fscanf(fp, "%s", tc)) != EOF)
     {
-        row_input= tc[0] - 97;
+        row_input = tc[0] - 97;
         column_input = tc[1] - 49;
-        if ( !Play_a_Move(row_input, column_input) )
-            printf("%c%d is a Wrong move\n", tc[0], column_input+1);
+        if (!Play_a_Move(row_input, column_input))
+            printf("%c%d is a Wrong move\n", tc[0], column_input + 1);
 
         Show_Board_and_Set_Legal_Moves();
     }
     fclose(fp);
-    return ( n%2 == 1 )? 'B' : 'W';
+    return (n % 2 == 1) ? 'B' : 'W';
 }
 //---------------------------------------------------------------------------
 
@@ -336,8 +338,8 @@ void Init()
     memset(Now_Board, 0, sizeof(int) * Board_Size * Board_Size);
 
     srand(time(NULL));
-    Now_Board[3][3] = Now_Board[4][4] = 2;//white, dark
-    Now_Board[3][4] = Now_Board[4][3] = 1;//black, light
+    Now_Board[3][3] = Now_Board[4][4] = 2; // white, dark
+    Now_Board[3][4] = Now_Board[4][3] = 1; // black, light
 
     HandNumber = 0;
     memset(sequence, -1, sizeof(int) * 100);
@@ -346,50 +348,50 @@ void Init()
     LastX = LastY = -1;
     Black_Count = White_Count = 0;
 
-//  Computer_Thinking = FALSE;
-    //debug_value = 0;
+    //  Computer_Thinking = FALSE;
+    // debug_value = 0;
     Search_Counter = 0;
 
-    //Computer_Take = 0;
+    // Computer_Take = 0;
     Winner = 0;
 }
 //---------------------------------------------------------------------------
 
-int Play_a_Move( int x, int y)
+int Play_a_Move(int x, int y)
 {
     FILE *fp;
 
-    if ( x == -1 && y == -1)
+    if (x == -1 && y == -1)
     {
-        fp = fopen( "of.txt", "r+" );
+        fp = fopen("of.txt", "r+");
 
-        fprintf( fp, "%2d\n", HandNumber+1 );
+        fprintf(fp, "%2d\n", HandNumber + 1);
         fclose(fp);
 
         fp = fopen("of.txt", "a");
-        fprintf( fp, "p9\n" );
-        fclose( fp );
+        fprintf(fp, "p9\n");
+        fclose(fp);
 
         sequence[HandNumber] = -1;
-        HandNumber ++;
+        HandNumber++;
         Turn = 1 - Turn;
         return 1;
     }
 
-    if ( !In_Board(x,y))
+    if (!In_Board(x, y))
         return 0;
-    Find_Legal_Moves( Stones[Turn] );
-    if( Legal_Moves[x][y] == FALSE )
+    Find_Legal_Moves(Stones[Turn]);
+    if (Legal_Moves[x][y] == FALSE)
         return 0;
 
-    if( Put_a_Stone(x,y) )
+    if (Put_a_Stone(x, y))
     {
-        Check_Cross(x,y,1);
+        Check_Cross(x, y, 1);
 
-        Compute_Grades( TRUE );
-//        Show_Board_and_Set_Legal_Moves();
+        Compute_Grades(TRUE);
+        //        Show_Board_and_Set_Legal_Moves();
 
-//        printf("Play %c%d\n", x+97, y+1);
+        //        printf("Play %c%d\n", x+97, y+1);
         return 1;
     }
     else
@@ -402,21 +404,22 @@ int Put_a_Stone(int x, int y)
 {
     FILE *fp;
 
-    if( Now_Board[x][y] == 0)
+    if (Now_Board[x][y] == 0)
     {
         sequence[HandNumber] = Turn;
         if (HandNumber == 0)
-            fp = fopen( "of.txt", "w" );
+            fp = fopen("of.txt", "w");
         else
-            fp = fopen( "of.txt", "r+" );
-        fprintf( fp, "%2d\n", HandNumber+1 );
-        HandNumber ++;
+            fp = fopen("of.txt", "r+");
+        fprintf(fp, "%2d\n", HandNumber + 1);
+        HandNumber++;
         fclose(fp);
 
         Now_Board[x][y] = Stones[Turn];
         fp = fopen("of.txt", "a");
-        fprintf( fp, "%c%d\n", x+97, y+1 );;
-        fclose( fp );
+        fprintf(fp, "%c%d\n", x + 97, y + 1);
+        ;
+        fclose(fp);
 
         LastX = x;
         LastY = y;
@@ -429,57 +432,58 @@ int Put_a_Stone(int x, int y)
 }
 //---------------------------------------------------------------------------
 
-void Show_Board_and_Set_Legal_Moves( void )
+void Show_Board_and_Set_Legal_Moves(void)
 {
-    int i,j;
+    int i, j;
 
-    Find_Legal_Moves( Stones[Turn] );
+    Find_Legal_Moves(Stones[Turn]);
 
     printf("a b c d e f g h\n");
-    for(i=0 ; i<Board_Size ; i++)
+    for (i = 0; i < Board_Size; i++)
     {
-        for(j=0 ; j<Board_Size ; j++)
+        for (j = 0; j < Board_Size; j++)
         {
-            if( Now_Board[j][i] > 0 )
+            if (Now_Board[j][i] > 0)
             {
-                if ( Now_Board[j][i] == 2 )
-                    printf("O ");//white
+                if (Now_Board[j][i] == 2)
+                    printf("O "); // white
                 else
-                    printf("X ");//black
+                    printf("X "); // black
             }
 
             if (Now_Board[j][i] == 0)
             {
-                if ( Legal_Moves[j][i] == 1)
+                if (Legal_Moves[j][i] == 1)
                     printf("? ");
-                else printf(". ");
+                else
+                    printf(". ");
             }
         }
-        printf(" %d\n", i+1);
+        printf(" %d\n", i + 1);
     }
     printf("\n");
 }
 //---------------------------------------------------------------------------
 
-int Find_Legal_Moves( int color )
+int Find_Legal_Moves(int color)
 {
-    int i,j;
+    int i, j;
     int me = color;
     int legal_count = 0;
 
-    for( i = 0; i < Board_Size; i++ )
-        for( j = 0; j < Board_Size; j++ )
+    for (i = 0; i < Board_Size; i++)
+        for (j = 0; j < Board_Size; j++)
             Legal_Moves[i][j] = 0;
 
-    for( i = 0; i < Board_Size; i++ )
-        for( j = 0; j < Board_Size; j++ )
-            if( Now_Board[i][j] == 0 )
+    for (i = 0; i < Board_Size; i++)
+        for (j = 0; j < Board_Size; j++)
+            if (Now_Board[i][j] == 0)
             {
                 Now_Board[i][j] = me;
-                if( Check_Cross(i,j,FALSE) == TRUE )
+                if (Check_Cross(i, j, FALSE) == TRUE)
                 {
                     Legal_Moves[i][j] = TRUE;
-                    legal_count ++;
+                    legal_count++;
                 }
                 Now_Board[i][j] = 0;
             }
@@ -492,89 +496,69 @@ int Check_Cross(int x, int y, int update)
     int k;
     int dx, dy;
 
-    if( ! In_Board(x,y) || Now_Board[x][y] == 0)
+    if (!In_Board(x, y) || Now_Board[x][y] == 0)
         return FALSE;
 
     int army = 3 - Now_Board[x][y];
     int army_count = 0;
 
-//   printf("%d, %d, %d, %d\n", x, y, Now_Board[x][y], army);
-    for( k=0 ; k<8 ; k++ )
+    //   printf("%d, %d, %d, %d\n", x, y, Now_Board[x][y], army);
+    for (k = 0; k < 8; k++)
     {
         dx = x + DirX[k];
         dy = y + DirY[k];
-        if( In_Board(dx,dy) && Now_Board[dx][dy] == army )
+        if (In_Board(dx, dy) && Now_Board[dx][dy] == army)
         {
-            army_count += Check_Straight_Army( x, y, k, update ) ;
-            //printf("%d, ", army_count);
+            army_count += Check_Straight_Army(x, y, k, update);
+            // printf("%d, ", army_count);
         }
     }
 
-    if(army_count >0)
+    if (army_count > 0)
         return TRUE;
     else
         return FALSE;
 }
 //---------------------------------------------------------------------------
 
-int Check_Straight_Army(int x, int y, int d, int update)
-{
+int Check_Straight_Army(int x, int y, int d, int update) {
+    int flip_list[Board_Size][2];  // Store (x,y) coordinates only
+    int flip_count = 0;
+    int tx = x, ty = y;
     int me = Now_Board[x][y];
-    int army = 3 - me;
-    int army_count=0;
-    int found_flag=FALSE;
-    int flag[ Board_Size ][ Board_Size ] = {{0}};
-
-    int i, j;
-    int tx, ty;
-
-    tx = x;
-    ty = y;
-
-    for(i=0 ; i<Board_Size ; i++)
-    {
-        tx += DirX[d];
+    int army = 3 - me;  // Opponent's piece
+    
+    // Scan direction to find flippable pieces
+    for (int i = 0; i < Board_Size; i++) {
+        tx += DirX[d]; 
         ty += DirY[d];
-
-        if(In_Board(tx,ty) )
-        {
-            if( Now_Board[tx][ty] == army )
-            {
-                army_count ++;
-                flag[tx][ty] = TRUE;
-            }
-            else if( Now_Board[tx][ty] == me)
-            {
-                found_flag = TRUE;
-                break;
-            }
-            else
-                break;
+        
+        if (!In_Board(tx, ty) || Now_Board[tx][ty] == 0) 
+            return 0;  // Hit boundary or empty - invalid
+            
+        if (Now_Board[tx][ty] == army) {
+            flip_list[flip_count][0] = tx;
+            flip_list[flip_count][1] = ty;
+            flip_count++;
         }
-        else
-            break;
-    }
-
-    if( (found_flag == TRUE) && (army_count > 0) && update)
-    {
-        for(i=0 ; i<Board_Size ; i++)
-            for(j=0; j<Board_Size ; j++)
-                if(flag[i][j]==TRUE)
-                {
-                    //Dead_Stone[i][j] = TRUE;
-                    if(Now_Board[i][j] != 0)
-                        Now_Board[i][j]= 3 - Now_Board[i][j];
+        else if (Now_Board[tx][ty] == me) {
+            // Found our piece - valid move
+            if (flip_count > 0 && update) {
+                // Flip only the pieces we tracked
+                for (int j = 0; j < flip_count; j++) {
+                    Now_Board[flip_list[j][0]][flip_list[j][1]] = me;
                 }
+            }
+            return flip_count;
+        }
     }
-    if( (found_flag == TRUE) && (army_count > 0))
-        return army_count;
-    else return 0;
+    return 0;  // Never found our piece
 }
 //---------------------------------------------------------------------------
 
 int In_Board(int x, int y)
 {
-    if( x >= 0 && x < Board_Size && y >= 0 && y < Board_Size )
+    if (x >= 0 && x < Board_Size && y >= 0 && y < Board_Size)
         return TRUE;
     else
         return FALSE;
@@ -583,86 +567,86 @@ int In_Board(int x, int y)
 
 int Compute_Grades(int flag)
 {
-    int i,j;
-    int B,W, BW, WW;
+    int i, j;
+    int B, W, BW, WW;
 
     B = BW = W = WW = 0;
 
-    for(i=0 ; i<Board_Size ; i++)
-        for(j=0 ; j<Board_Size ; j++)
+    for (i = 0; i < Board_Size; i++)
+        for (j = 0; j < Board_Size; j++)
         {
-            if( Now_Board[i][j]==1 )
+            if (Now_Board[i][j] == 1)
             {
                 B++;
-                BW = BW + board_weight[i][j] ;
+                BW = BW + board_weight[i][j];
             }
-            else if( Now_Board[i][j]==2 )
+            else if (Now_Board[i][j] == 2)
             {
                 W++;
-                WW = WW + board_weight[i][j] ;
+                WW = WW + board_weight[i][j];
             }
         }
 
-    if(flag)
+    if (flag)
     {
         Black_Count = B;
         White_Count = W;
         printf("#%d Grade: Black %d, White %d\n", HandNumber, B, W);
     }
 
-    return ( BW - WW );
+    return (BW - WW);
 }
 //---------------------------------------------------------------------------
 
-int Check_EndGame( void )
+int Check_EndGame(void)
 {
     int lc1, lc2;
     FILE *fp;
 
-    lc2 = Find_Legal_Moves( Stones[1 - Turn] );
-    lc1 = Find_Legal_Moves( Stones[Turn] );
-//20210529 edit************
-    if ( lc1==0 && lc2==0 )
+    lc2 = Find_Legal_Moves(Stones[1 - Turn]);
+    lc1 = Find_Legal_Moves(Stones[Turn]);
+    // 20210529 edit************
+    if (lc1 == 0 && lc2 == 0)
     {
         fp = fopen("of.txt", "a");
         Total_Time = clock() - Total_Time;
 
-        if (HandNumber%2 == 1)
+        if (HandNumber % 2 == 1)
         {
-            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time/60000, (Total_Time%60000)/1000 );
-            fprintf(fp, "Black used time= %d min. %d sec.\n", Think_Time/60000, (Think_Time%60000)/1000 );
+            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
+            fprintf(fp, "Black used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
         }
         else
         {
-            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time/60000, (Total_Time%60000)/1000 );
-            fprintf(fp, "White used time= %d min. %d sec.\n", Think_Time/60000, (Think_Time%60000)/1000 );
+            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
+            fprintf(fp, "White used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
         }
 
-        if(Black_Count > White_Count)
+        if (Black_Count > White_Count)
         {
             printf("Black(F) Win!\n");
-			fprintf(fp, "wB%d\n", Black_Count - White_Count);
-            if(Winner == 0)
+            fprintf(fp, "wB%d\n", Black_Count - White_Count);
+            if (Winner == 0)
                 Winner = 1;
         }
-        else if(Black_Count < White_Count)
+        else if (Black_Count < White_Count)
         {
             printf("White(S) Win!\n");
-			fprintf(fp, "wW%d\n", White_Count - Black_Count);
-            if(Winner == 0)
+            fprintf(fp, "wW%d\n", White_Count - Black_Count);
+            if (Winner == 0)
                 Winner = 2;
         }
         else
         {
             printf("Draw\n");
-			fprintf(fp, "wZ%d\n", White_Count - Black_Count);
+            fprintf(fp, "wZ%d\n", White_Count - Black_Count);
             Winner = 0;
         }
         fclose(fp);
-//***************
+        //***************
         Show_Board_and_Set_Legal_Moves();
         printf("Game is over");
-//        scanf("%d", &lc1);
+        //        scanf("%d", &lc1);
         return TRUE;
     }
 
@@ -670,9 +654,9 @@ int Check_EndGame( void )
 }
 //---------------------------------------------------------------------------
 
-void Computer_Think( int *x, int *y )
+void Computer_Think(int *x, int *y)
 {
-//20210529 edit************
+    // 20210529 edit************
     time_t clockBegin, clockEnd, tinterval;
     int flag;
 
@@ -681,16 +665,16 @@ void Computer_Think( int *x, int *y )
     resultX = resultY = -1;
     Search_Counter = 0;
 
-    flag = Search( Turn, 0);
+    flag = Search(Turn, 0);
 
     clockEnd = clock();
-    tinterval = clockEnd - clockBegin ;
-    Think_Time += tinterval ;
-    if ( tinterval < 200 )
-        Delay( 200 - Think_Time );
-    printf("used thinking time= %d min. %d.%d sec.\n", Think_Time/60000, (Think_Time%60000)/1000,  (Think_Time%60000)%1000);
-//**************************
-    if( flag )
+    tinterval = clockEnd - clockBegin;
+    Think_Time += tinterval;
+    if (tinterval < 200)
+        Delay(200 - Think_Time);
+    printf("used thinking time= %d min. %d.%d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000, (Think_Time % 60000) % 1000);
+    //**************************
+    if (flag)
     {
         *x = resultX;
         *y = resultY;
@@ -700,14 +684,13 @@ void Computer_Think( int *x, int *y )
         *x = *y = -1;
         return;
     }
-
 }
 //---------------------------------------------------------------------------
 
-//MinMax search
+// MinMax search
 int Search(int myturn, int mylevel)
 {
-    int i,j;
+    int i, j;
 
     Location min, max;
 
@@ -717,57 +700,57 @@ int Search(int myturn, int mylevel)
     max.i = max.j = -1;
     max.g = -99999;
 
-    int B[ Board_Size ][ Board_Size ];
-    int L[ Board_Size ][ Board_Size ];
+    int B[Board_Size][Board_Size];
+    int L[Board_Size][Board_Size];
 
-    memcpy( B, Now_Board, sizeof(int) * Board_Size * Board_Size );
-    //search_level_now = 0;
+    memcpy(B, Now_Board, sizeof(int) * Board_Size * Board_Size);
+    // search_level_now = 0;
 
-    int c = Find_Legal_Moves( Stones[myturn] );
-    if(c <= 0) return FALSE;
+    int c = Find_Legal_Moves(Stones[myturn]);
+    if (c <= 0)
+        return FALSE;
 
-
-    memcpy( L, Legal_Moves, sizeof(int) * Board_Size * Board_Size );
-////20210529 edit************
-//random move
+    memcpy(L, Legal_Moves, sizeof(int) * Board_Size * Board_Size);
+    ////20210529 edit************
+    // random move
     if (HandNumber < 7)
-        while ( 1 )
-            for( i = Board_Size; i >= 0; i-- )
-                for( j = Board_Size; j >= 0; j-- )
-                    if(L[i][j] == TRUE)
+        while (1)
+            for (i = Board_Size; i >= 0; i--)
+                for (j = Board_Size; j >= 0; j--)
+                    if (L[i][j] == TRUE)
                     {
-                        if ( rand()%10 <= 1 || HandNumber < 2 )
+                        if (rand() % 10 <= 1 || HandNumber < 2)
                         {
                             resultX = i;
                             resultY = j;
                             return TRUE;
                         }
                     }
-//********************************
+    //********************************
     int alpha = -99999;
     int beta = 99999;
     int g = -1;
 
-    for( i = 0; i < Board_Size; i++ )
-        for( j = 0; j < Board_Size; j++ )
-            if(L[i][j] == TRUE)//you could add move ordering
+    for (i = 0; i < Board_Size; i++)
+        for (j = 0; j < Board_Size; j++)
+            if (L[i][j] == TRUE) // you could add move ordering
             {
-                memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size );
+                memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size);
                 Now_Board[i][j] = Stones[myturn];
-                Check_Cross(i,j,TRUE) ;
+                Check_Cross(i, j, TRUE);
 
-                g = search_next(i,j, 1-myturn, mylevel+1, alpha, beta);
+                g = search_next(i, j, 1 - myturn, mylevel + 1, alpha, beta);
 
-                if( myturn == 0 )  // max level
-                    if( g > max.g )
+                if (myturn == 0) // max level
+                    if (g > max.g)
                     {
                         max.g = g;
                         max.i = i;
                         max.j = j;
                     }
 
-                if( myturn == 1 )
-                    if( g < min.g )
+                if (myturn == 1)
+                    if (g < min.g)
                     {
                         min.g = g;
                         min.i = i;
@@ -783,15 +766,15 @@ int Search(int myturn, int mylevel)
                 */
             }
 
-    memcpy( Now_Board, B, sizeof(int) * Board_Size * Board_Size );
+    memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size);
 
-    if( myturn == 0 )
+    if (myturn == 0)
     {
         resultX = max.i;
         resultY = max.j;
         return TRUE;
     }
-    else if( myturn == 1 )
+    else if (myturn == 1)
     {
         resultX = min.i;
         resultY = min.j;
@@ -801,64 +784,64 @@ int Search(int myturn, int mylevel)
 }
 //---------------------------------------------------------------------------
 
-int search_next( int x, int y, int myturn, int mylevel, int alpha, int beta )
+int search_next(int x, int y, int myturn, int mylevel, int alpha, int beta)
 {
     int g;
 
-    Search_Counter ++;
+    Search_Counter++;
 
-    if( mylevel >= search_deep )
+    if (mylevel >= search_deep)
     {
-        g = Compute_Grades( FALSE );
+        g = Compute_Grades(FALSE);
         return g;
     }
     else
     {
-        int i,j;
-        ///int my_alpha = alpha; int my_beta = beta;
+        int i, j;
+        /// int my_alpha = alpha; int my_beta = beta;
 
-        //Location min; min.i = -1; min.j = -1; min.g = 99999;
-        //Location max; max.i = -1; max.i = -1; max.g = -99999;
+        // Location min; min.i = -1; min.j = -1; min.g = 99999;
+        // Location max; max.i = -1; max.i = -1; max.g = -99999;
 
-        int B[ Board_Size ][ Board_Size ];
-        int L[ Board_Size ][ Board_Size ];
+        int B[Board_Size][Board_Size];
+        int L[Board_Size][Board_Size];
 
-        int c = Find_Legal_Moves( Stones[myturn] );
-        if(c <= 0)
+        int c = Find_Legal_Moves(Stones[myturn]);
+        if (c <= 0)
         {
-            g = Compute_Grades( FALSE );
+            g = Compute_Grades(FALSE);
             return g;
         }
 
-        memcpy( B, Now_Board, sizeof(int) * Board_Size * Board_Size );
-        memcpy( L, Legal_Moves, sizeof(int) * Board_Size * Board_Size );
+        memcpy(B, Now_Board, sizeof(int) * Board_Size * Board_Size);
+        memcpy(L, Legal_Moves, sizeof(int) * Board_Size * Board_Size);
 
-        for(i=0; i<Board_Size ; i++)
-            for(j=0 ; j<Board_Size ; j++)
-                if(L[i][j] == TRUE)//you could add move ordering
+        for (i = 0; i < Board_Size; i++)
+            for (j = 0; j < Board_Size; j++)
+                if (L[i][j] == TRUE) // you could add move ordering
                 {
 
-                    memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size );
+                    memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size);
                     Now_Board[i][j] = Stones[myturn];
-                    Check_Cross(i,j, TRUE) ;
+                    Check_Cross(i, j, TRUE);
 
-                    g = search_next(i,j, 1-myturn, mylevel+1, alpha, beta);// could use transposition table
+                    g = search_next(i, j, 1 - myturn, mylevel + 1, alpha, beta); // could use transposition table
 
-                    //Memo1->Lines->Add("lv=" + IntToStr(mylevel) + ",g=" + IntToStr(g) );
+                    // Memo1->Lines->Add("lv=" + IntToStr(mylevel) + ",g=" + IntToStr(g) );
 
-                    if(myturn==0)  // max ply
+                    if (myturn == 0) // max ply
                     {
-                        if(g > alpha)
+                        if (g > alpha)
                             alpha = g;
                     }
-                    if(myturn==1)// min ply
+                    if (myturn == 1) // min ply
                     {
-                        if(g < beta)
+                        if (g < beta)
                             beta = g;
                     }
 
-                    if( alpha_beta_option == TRUE)
-                        if( alpha >= beta )// cutoff
+                    if (alpha_beta_option == TRUE)
+                        if (alpha >= beta) // cutoff
                         {
                             i = Board_Size;
                             j = Board_Size;
@@ -868,10 +851,10 @@ int search_next( int x, int y, int myturn, int mylevel, int alpha, int beta )
 
         memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size);
 
-        if(myturn == 0) // max level
-            return alpha; //max.g;
+        if (myturn == 0)  // max level
+            return alpha; // max.g;
         else
-            return beta; //min.g;
+            return beta; // min.g;
     }
 }
 //---------------------------------------------------------------------------
