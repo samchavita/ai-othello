@@ -914,7 +914,7 @@ int append_move_to_oftxt(GameState *g, const char *move_str)
     fp = fopen("of.txt", "w");
     if (!fp)
         return 0;
-    fprintf(fp, "%2d\n", n);
+    fprintf(fp, "%2d", n);
     for (int i = 0; i < n; i++)
     {
         fprintf(fp, "%s\n", moves[i]);
@@ -1110,185 +1110,111 @@ int main(int argc, char *argv[])
 {
     init_zobrist();
     init_killers();
-
     GameState g;
     init_board(&g);
-
-    int modeAuto = 0, modeHumanBlack = 0, modeHumanWhite = 0, loadOnly = 0;
     int depth = 6; // default
-
-    modeAuto = 0;
-    g.turn = 1;
-
-    // if (argc == 1)
-    // {
-    //     print_help();
-    // }
-    // else
-    // {
-    //     if (argc >= 2)
-    //     {
-    //         char m = argv[1][0];
-    //         if (m == 'F' || m == 'f')
-    //         {
-    //             modeAuto = 0;
-    //             g.turn = 0;
-    //         }
-    //         else if (m == 'S' || m == 's')
-    //         {
-    //             modeAuto = 0;
-    //             g.turn = 1;
-    //         }
-    //         else if (m == 'A' || m == 'a')
-    //         {
-    //             modeAuto = 1;
-    //         }
-    //         else if (m == 'B' || m == 'b')
-    //         {
-    //             modeHumanBlack = 1;
-    //         }
-    //         else if (m == 'W' || m == 'w')
-    //         {
-    //             modeHumanWhite = 1;
-    //         }
-    //         else if (m == 'L' || m == 'l')
-    //         {
-    //             loadOnly = 1;
-    //         }
-    //         else
-    //         {
-    //             print_help();
-    //         }
-    //     }
-    //     if (argc >= 3)
-    //     {
-    //         int d = atoi(argv[2]);
-    //         if (d > 0)
-    //             depth = d;
-    //     }
-    // }
-
-    load_or_init_oftxt();
-    char moves[MAX_MOVES][4];
     int moves_n = 0;
-    if (load_game_from_file(&g, moves, &moves_n))
+
+    /* Auto-play / engine modes */
+    if (argv[1][0] == 'S')
     {
-        /* loaded */
-    }
+        load_or_init_oftxt();
+        char moves[MAX_MOVES][4];
+        if (load_game_from_file(&g, moves, &moves_n))
+        {
+            /* loaded */
+        }
 
-    // if (loadOnly)
-    // {
-    //     print_board(&g);
-    //     printf("Loaded and exiting (L mode).\n");
-    //     return 0;
-    // }
-
-    // /* Human vs Computer modes */
-    // if (modeHumanBlack || modeHumanWhite)
-    // {
-    //     int human_is_black = modeHumanBlack ? 1 : 0;
-    //     print_board(&g);
-    //     while (!is_game_over(&g))
-    //     {
-    //         int color = color_of_turn(&g);
-    //         int our_turn = (!human_is_black && color == WHITE) || (human_is_black && color == BLACK) ? 0 : 1;
-    //         if (our_turn)
-    //         {
-    //             int x, y;
-    //             int moves_avail = count_legal_moves(&g, color);
-    //             if (moves_avail == 0)
-    //             {
-    //                 printf("Engine passes.\n");
-    //                 play_and_write_move(&g, -1, -1);
-    //                 continue;
-    //             }
-    //             choose_best_move(&g, depth, &x, &y);
-    //             if (x < 0)
-    //             {
-    //                 printf("Engine passes.\n");
-    //                 play_and_write_move(&g, -1, -1);
-    //                 continue;
-    //             }
-    //             Move flips[MAX_FLIPS];
-    //             int fc = 0;
-    //             is_legal_move(&g, color, x, y, flips, &fc);
-    //             apply_move_with_flips(&g, color, x, y, flips, fc);
-    //             char m[8];
-    //             coords_to_notation(m, x, y);
-    //             append_move_to_oftxt(&g, m);
-    //             printf("Engine plays %s\n", m);
-    //             print_board(&g);
-    //         }
-    //         else
-    //         {
-    //             int hx, hy;
-    //             if (!get_human_move(&g, &hx, &hy))
-    //             {
-    //                 continue;
-    //             }
-    //             if (hx == -1)
-    //             {
-    //                 g.turn = 1 - g.turn;
-    //                 g.move_count++;
-    //                 append_move_to_oftxt(&g, "p9");
-    //             }
-    //             else
-    //             {
-    //                 Move flips[MAX_FLIPS];
-    //                 int fc = 0;
-    //                 int color = color_of_turn(&g);
-    //                 is_legal_move(&g, color, hx, hy, flips, &fc);
-    //                 apply_move_with_flips(&g, color, hx, hy, flips, fc);
-    //                 char m[8];
-    //                 coords_to_notation(m, hx, hy);
-    //                 append_move_to_oftxt(&g, m);
-    //             }
-    //             print_board(&g);
-    //         }
-    //     }
-    //     printf("Game over!\n");
-    //     int b = count_disks(&g, BLACK), w = count_disks(&g, WHITE);
-    //     printf("Final score - Black: %d  White: %d\n", b, w);
-    //     return 0;
-    // }
-
-    /* Auto-play / engine-only modes */
-    if (modeAuto || argv[1][0] == 'S')
-    {
         while (!is_game_over(&g))
         {
-            int color = color_of_turn(&g);
-            int moves_avail = count_legal_moves(&g, color);
-            if (moves_avail == 0)
+            load_or_init_oftxt();
+            char moves[MAX_MOVES][4];
+            if (load_game_from_file(&g, moves, &moves_n))
             {
-                printf("%s passes.\n", color == BLACK ? "Black" : "White");
-                g.turn = 1 - g.turn;
-                g.move_count++;
-                append_move_to_oftxt(&g, "p9");
-                continue;
+                /* loaded */
             }
-            int bx, by;
-            choose_best_move(&g, depth, &bx, &by);
-            if (bx < 0)
+
+            // print_board(&g);
+            // printf("\n turn: %d\n", g.turn);
+
+            // if (g.move_count == 3) return 0;
+
+            if (g.turn != WHITE)
             {
-                g.turn = 1 - g.turn;
-                g.move_count++;
-                append_move_to_oftxt(&g, "p9");
-                printf("%s passes (no legal).\n", color == BLACK ? "Black" : "White");
+                continue;
             }
             else
             {
-                Move flips[MAX_FLIPS];
-                int fc = 0;
-                is_legal_move(&g, color, bx, by, flips, &fc);
-                apply_move_with_flips(&g, color, bx, by, flips, fc);
-                char m[8];
-                coords_to_notation(m, bx, by);
-                append_move_to_oftxt(&g, m);
-                printf("%s plays %s\n", color == BLACK ? "Black" : "White", m);
+                // int color = color_of_turn(&g);
+                int color = WHITE;
+                int moves_avail = count_legal_moves(&g, color);
+                if (moves_avail == 0)
+                {
+                    printf("%s passes.\n", "White");
+                    g.turn = 1 - g.turn;
+                    g.move_count++;
+                    append_move_to_oftxt(&g, "p9");
+                    continue;
+                }
+                int bx, by;
+                choose_best_move(&g, depth, &bx, &by);
+                if (bx < 0)
+                {
+                    g.turn = 1 - g.turn;
+                    g.move_count++;
+                    append_move_to_oftxt(&g, "p9");
+                    printf("%s passes (no legal).\n", "White");
+                }
+                else
+                {
+                    Move flips[MAX_FLIPS];
+                    int fc = 0;
+                    is_legal_move(&g, color, bx, by, flips, &fc);
+                    apply_move_with_flips(&g, color, bx, by, flips, fc);
+                    char m[8];
+                    coords_to_notation(m, bx, by);
+                    append_move_to_oftxt(&g, m);
+                    printf("%s plays %s\n", "White", m);
+                }
+                print_board(&g);
             }
-            print_board(&g);
         }
+
+
+        // while (!is_game_over(&g))
+        // {
+        //     int color = color_of_turn(&g);
+        //     int moves_avail = count_legal_moves(&g, color);
+        //     if (moves_avail == 0)
+        //     {
+        //         printf("%s passes.\n", color == BLACK ? "Black" : "White");
+        //         g.turn = 1 - g.turn;
+        //         g.move_count++;
+        //         append_move_to_oftxt(&g, "p9");
+        //         continue;
+        //     }
+        //     int bx, by;
+        //     choose_best_move(&g, depth, &bx, &by);
+        //     if (bx < 0)
+        //     {
+        //         g.turn = 1 - g.turn;
+        //         g.move_count++;
+        //         append_move_to_oftxt(&g, "p9");
+        //         printf("%s passes (no legal).\n", color == BLACK ? "Black" : "White");
+        //     }
+        //     else
+        //     {
+        //         Move flips[MAX_FLIPS];
+        //         int fc = 0;
+        //         is_legal_move(&g, color, bx, by, flips, &fc);
+        //         apply_move_with_flips(&g, color, bx, by, flips, fc);
+        //         char m[8];
+        //         coords_to_notation(m, bx, by);
+        //         append_move_to_oftxt(&g, m);
+        //         printf("%s plays %s\n", color == BLACK ? "Black" : "White", m);
+        //     }
+        //     print_board(&g);
+        // }
         printf("Auto-play finished.\n");
         int b = count_disks(&g, BLACK), w = count_disks(&g, WHITE);
         printf("Final score - Black: %d  White: %d\n", b, w);
