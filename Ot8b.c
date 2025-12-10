@@ -1,1250 +1,1209 @@
-/*
- * Ot8b.c
- *
- * Enhanced Othello/Reversi engine (single-file).
- * - Keeps original multi-factor evaluation (material, mobility, positional, frontier, stability)
- * - Implements enhancements from ENHANCEMENT_PROMPT.md:
- *     * Zobrist hashing + transposition table
- *     * Killer move heuristic
- *     * Endgame exact solver (search to end when <=12 moves remaining)
- *     * Opening-book check stub (small sample book)
- *     * Corner control & parity tweaks in evaluation
- *
- * Build:
- *   gcc -O3 -std=c99 -o Ot8b Ot8b.c
- *
- * Usage:
- *   See original Ot8b.c usage (supports F/S/A/B/W/L modes).
- *
- * Notes:
- * - All changes are kept in a single file for tournament use.
- * - This file avoids background tasks and external waiting loops.
- *
- * Author: Generated (enhanced) for user
- */
-
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <math.h>
+#include <memory.h>
 #include <time.h>
+#include <assert.h>
 
-/* -------------------- Basic game definitions -------------------- */
-
-#define EMPTY 0
-#define BLACK 1
-#define WHITE 2
-
-#define MAX_MOVES 1000
-#define MAX_FLIPS 64
-#define MAX_LEGAL 64
+#define Board_Size 8
+#define TRUE 1
+#define FALSE 0
 #define INF 1000000000
 
+void Delay(unsigned int mseconds);
+// int Read_File( FILE *p, char *c );//open a file and get the next move, for play by file
+char Load_File(void); // load a file and start a game
+
+void Init();
+int Play_a_Move(int x, int y);
+void Show_Board_and_Set_Legal_Moves(void);
+int Put_a_Stone(int x, int y);
+
+int In_Board(int x, int y);
+int Check_Cross(int x, int y, int update);
+int Check_Straight_Army(int x, int y, int d, int update);
+
+int Find_Legal_Moves(int color);
+int Check_EndGame(void);
+int Compute_Grades(int flag);
+
+void Computer_Think(int *x, int *y);
+int Search(int myturn, int mylevel);
+int search_next(int x, int y, int myturn, int mylevel, int alpha, int beta);
+
+int Search_Counter;
+int Computer_Take;
+int Winner;
+int Now_Board[Board_Size][Board_Size];
+int Legal_Moves[Board_Size][Board_Size];
+int HandNumber;
+int sequence[100];
+
+int Black_Count, White_Count;
+int Turn = 0;           // 0 is black or 1 is white
+int Stones[2] = {1, 2}; // 1: black, 2: white
+int DirX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+int DirY[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+
+int LastX, LastY;
+int Think_Time = 0, Total_Time = 0;
+
+int search_deep = 8; // slightly deeper default search for stronger play
+
+int alpha_beta_option = TRUE;
+int resultX, resultY;
+
+// Improved positional weights for stronger play
+int board_weight[8][8] =
+    // a,  b,   c,   d,   e,   f,   g,   h
+    {
+        {120, -25, 20, 5, 5, 20, -25, 120},     // 1
+        {-25, -45, -10, -5, -5, -10, -45, -25}, // 2
+        {20, -10, 15, 3, 3, 15, -10, 20},       // 3
+        {5, -5, 3, 1, 1, 3, -5, 5},             // 4
+        {5, -5, 3, 1, 1, 3, -5, 5},             // 5
+        {20, -10, 15, 3, 3, 15, -10, 20},       // 6
+        {-25, -45, -10, -5, -5, -10, -45, -25}, // 7
+        {120, -25, 20, 5, 5, 20, -25, 120}      // 8
+};
+
+// Transposition table & Zobrist hashing for caching positions
 typedef struct
 {
-    int x, y;
-} Move;
-
-typedef struct
-{
-    int board[8][8];
-    int turn;       // 0 = black to move, 1 = white to move
-    int move_count; // number of moves played (starting from 1 per spec)
-} GameState;
-
-/* directions */
-const int DX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
-const int DY[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
-
-/* positional weight table (y,x) indexing kept same as original */
-const int POSVAL[8][8] = {
-    {100, -20, 10, 5, 5, 10, -20, 100},
-    {-20, -50, -2, -1, -1, -2, -50, -20},
-    {10, -2, 1, 1, 1, 1, -2, 10},
-    {5, -1, 1, 0, 0, 1, -1, 5},
-    {5, -1, 1, 0, 0, 1, -1, 5},
-    {10, -2, 1, 1, 1, 1, -2, 10},
-    {-20, -50, -2, -1, -1, -2, -50, -20},
-    {100, -20, 10, 5, 5, 10, -20, 100}};
-
-/* -------------------- Forward declarations -------------------- */
-void init_board(GameState *g);
-int in_bounds(int x, int y);
-int opponent_color(int color);
-int color_of_turn(GameState *g);
-int is_legal_move(GameState *g, int color, int x, int y, Move flips[], int *flip_count);
-int generate_moves(GameState *g, int color, Move moves[], int *n_moves, int flipinfo[][MAX_FLIPS], int flipcounts[]);
-void apply_move_with_flips(GameState *g, int color, int x, int y, Move flips[], int flip_count);
-void undo_move_with_flips(GameState *g, int color, int x, int y, Move flips[], int flip_count);
-int count_disks(GameState *g, int color);
-int count_legal_moves(GameState *g, int color);
-int evaluate(GameState *g);
-int exact_evaluate(GameState *g, int color);
-int negamax(GameState *g, int depth, int alpha, int beta, int color, Move *bestmove, int ply);
-void play_and_write_move(GameState *g, int x, int y);
-void write_pass(GameState *g);
-int load_game_from_file(GameState *g, char moves_out[][4], int *moves_n);
-int append_move_to_oftxt(GameState *g, const char *move_str);
-void print_board(GameState *g);
-void coords_to_notation(char *s, int x, int y);
-int notation_to_coords(const char *s, int *x, int *y);
-int is_game_over(GameState *g);
-int count_frontier(GameState *g, int color);
-int count_stable_approx(GameState *g, int color);
-int choose_best_move(GameState *g, int depth, int *out_x, int *out_y);
-int get_human_move(GameState *g, int *rx, int *ry);
-void print_help();
-
-/* -------------------- Zobrist & Transposition Table -------------------- */
-
-#define HASH_TABLE_SIZE 131072 // must be power of two for modulo performance
-#define ZOBRIST_SEED 12345
-
-typedef struct
-{
-    unsigned long long hash;
+    unsigned long long key;
     int depth;
     int value;
-    int flag; // 0=exact, 1=lower bound (alpha), 2=upper bound (beta)
-} TranspositionEntry;
+    int flag; // 0: exact, 1: lower bound, 2: upper bound
+    int bestX;
+    int bestY;
+} TTEntry;
 
-static TranspositionEntry hash_table[HASH_TABLE_SIZE];
-static unsigned long long zobrist[8][8][3]; // zobrist[x][y][piece]
-static int zobrist_inited = 0;
+// Larger TT for stronger play
+#define TT_SIZE (1 << 21)
+#define TT_FLAG_EXACT 0
+#define TT_FLAG_LOWER 1
+#define TT_FLAG_UPPER 2
 
-/* Check both players have no moves or board full */
-int is_game_over(GameState *g)
+unsigned long long zobrist_table[Board_Size][Board_Size][3];
+unsigned long long zobrist_turn[2];
+TTEntry transTable[TT_SIZE];
+
+typedef struct
 {
-    int anyEmpty = 0;
-    for (int x = 0; x < 8; x++)
-        for (int y = 0; y < 8; y++)
-            if (g->board[x][y] == EMPTY)
-                anyEmpty = 1;
-    if (!anyEmpty)
-        return 1;
-    if (count_legal_moves(g, BLACK) == 0 && count_legal_moves(g, WHITE) == 0)
-        return 1;
-    return 0;
+    int x;
+    int y;
+    int score;
+} Move;
+
+void init_zobrist(void);
+unsigned long long rand64(void);
+unsigned long long compute_hash(int myturn);
+
+int count_empty(void);
+int is_corner(int x, int y);
+int is_x_square(int x, int y);
+int is_c_square(int x, int y);
+int move_heuristic(int x, int y);
+
+int negamax(int depth, int alpha, int beta, int myturn);
+int negamax_root(int depth, int myturn, int *outX, int *outY);
+
+typedef struct location
+{
+    int i;
+    int j;
+    int g;
+} Location;
+
+//---------------------------------------------------------------------------
+
+// Zobrist hashing initialization
+void init_zobrist(void)
+{
+    int i, j, k;
+    for (i = 0; i < Board_Size; ++i)
+        for (j = 0; j < Board_Size; ++j)
+            for (k = 0; k < 3; ++k)
+                zobrist_table[i][j][k] = rand64();
+
+    zobrist_turn[0] = rand64();
+    zobrist_turn[1] = rand64();
+
+    memset(transTable, 0, sizeof(transTable));
 }
 
-void init_zobrist()
+unsigned long long rand64(void)
 {
-    if (zobrist_inited)
-        return;
-    srand(ZOBRIST_SEED);
-    for (int x = 0; x < 8; x++)
-    {
-        for (int y = 0; y < 8; y++)
-        {
-            for (int c = 0; c < 3; c++)
-            {
-                unsigned long long hi = ((unsigned long long)rand() & 0xFFFF);
-                unsigned long long lo = ((unsigned long long)rand() & 0xFFFF);
-                unsigned long long v = (hi << 48) ^ (lo << 32) ^ ((unsigned long long)rand() << 16) ^ rand();
-                zobrist[x][y][c] = v;
-            }
-        }
-    }
-    zobrist_inited = 1;
-    // initialize hash table
-    for (int i = 0; i < HASH_TABLE_SIZE; i++)
-    {
-        hash_table[i].hash = 0;
-        hash_table[i].depth = -1;
-        hash_table[i].value = 0;
-        hash_table[i].flag = 0;
-    }
+    unsigned long long r = (unsigned long long)rand();
+    r ^= ((unsigned long long)rand() << 15);
+    r ^= ((unsigned long long)rand() << 30);
+    r ^= ((unsigned long long)rand() << 45);
+    r ^= ((unsigned long long)rand() << 60);
+    return r;
 }
 
-unsigned long long compute_hash(GameState *g)
+unsigned long long compute_hash(int myturn)
 {
-    unsigned long long h = 0ULL;
-    for (int x = 0; x < 8; x++)
-    {
-        for (int y = 0; y < 8; y++)
-        {
-            int p = g->board[x][y]; // 0/1/2
-            h ^= zobrist[x][y][p];
-        }
-    }
-    if (g->turn == 1)
-        h ^= 0xDEADBEEFDEADBEEFULL;
+    unsigned long long h = zobrist_turn[myturn];
+    int i, j;
+    for (i = 0; i < Board_Size; ++i)
+        for (j = 0; j < Board_Size; ++j)
+            if (Now_Board[i][j] != 0)
+                h ^= zobrist_table[i][j][Now_Board[i][j]];
     return h;
 }
 
-int probe_hash(unsigned long long hash, int depth, int *value, int *flag)
+int count_empty(void)
 {
-    unsigned long long idx = hash & (HASH_TABLE_SIZE - 1);
-    TranspositionEntry *entry = &hash_table[idx];
-    if (entry->hash == hash && entry->depth >= depth)
-    {
-        *value = entry->value;
-        *flag = entry->flag;
+    int i, j;
+    int empty = 0;
+    for (i = 0; i < Board_Size; ++i)
+        for (j = 0; j < Board_Size; ++j)
+            if (Now_Board[i][j] == 0)
+                empty++;
+    return empty;
+}
+
+int is_corner(int x, int y)
+{
+    return ((x == 0 || x == Board_Size - 1) && (y == 0 || y == Board_Size - 1));
+}
+
+int is_x_square(int x, int y)
+{
+    return ((x == 1 && y == 1) ||
+            (x == Board_Size - 2 && y == 1) ||
+            (x == 1 && y == Board_Size - 2) ||
+            (x == Board_Size - 2 && y == Board_Size - 2));
+}
+
+int is_c_square(int x, int y)
+{
+    if ((x == 0 && y == 1) || (x == 1 && y == 0) ||
+        (x == Board_Size - 2 && y == 0) || (x == Board_Size - 1 && y == 1) ||
+        (x == 0 && y == Board_Size - 2) || (x == 1 && y == Board_Size - 1) ||
+        (x == Board_Size - 2 && y == Board_Size - 1) || (x == Board_Size - 1 && y == Board_Size - 2))
         return 1;
-    }
     return 0;
 }
 
-void store_hash(unsigned long long hash, int depth, int value, int flag)
+int move_heuristic(int x, int y)
 {
-    unsigned long long idx = hash & (HASH_TABLE_SIZE - 1);
-    TranspositionEntry *entry = &hash_table[idx];
-    if (depth >= entry->depth)
+    int score = board_weight[x][y];
+    int empty = count_empty();
+    int discs = Board_Size * Board_Size - empty;
+
+    // Corners are extremely valuable
+    if (is_corner(x, y))
+        score += 10000;
+
+    // X-squares are dangerous if corner empty
+    if (is_x_square(x, y))
     {
-        entry->hash = hash;
-        entry->depth = depth;
-        entry->value = value;
-        entry->flag = flag;
+        if (x == 1 && y == 1 && Now_Board[0][0] == 0)
+            score -= (discs < 48) ? 8000 : 2000;
+        if (x == Board_Size - 2 && y == 1 && Now_Board[Board_Size - 1][0] == 0)
+            score -= (discs < 48) ? 8000 : 2000;
+        if (x == 1 && y == Board_Size - 2 && Now_Board[0][Board_Size - 1] == 0)
+            score -= (discs < 48) ? 8000 : 2000;
+        if (x == Board_Size - 2 && y == Board_Size - 2 && Now_Board[Board_Size - 1][Board_Size - 1] == 0)
+            score -= (discs < 48) ? 8000 : 2000;
     }
+
+    // C-squares also dangerous early if corner empty
+    if (is_c_square(x, y))
+    {
+        int penalty = (discs < 40) ? 4000 : 1000;
+
+        if (x == 0 && y == 1 && Now_Board[0][0] == 0)
+            score -= penalty;
+        if (x == 1 && y == 0 && Now_Board[0][0] == 0)
+            score -= penalty;
+
+        if (x == Board_Size - 2 && y == 0 && Now_Board[Board_Size - 1][0] == 0)
+            score -= penalty;
+        if (x == Board_Size - 1 && y == 1 && Now_Board[Board_Size - 1][0] == 0)
+            score -= penalty;
+
+        if (x == 0 && y == Board_Size - 2 && Now_Board[0][Board_Size - 1] == 0)
+            score -= penalty;
+        if (x == 1 && y == Board_Size - 1 && Now_Board[0][Board_Size - 1] == 0)
+            score -= penalty;
+
+        if (x == Board_Size - 2 && y == Board_Size - 1 && Now_Board[Board_Size - 1][Board_Size - 1] == 0)
+            score -= penalty;
+        if (x == Board_Size - 1 && y == Board_Size - 2 && Now_Board[Board_Size - 1][Board_Size - 1] == 0)
+            score -= penalty;
+    }
+
+    return score;
 }
 
-/* -------------------- Killer moves -------------------- */
+//---------------------------------------------------------------------------
 
-#define MAX_DEPTH 64 // safe upper bound for ply
-static Move killers[MAX_DEPTH][2];
-
-void init_killers()
+int main(int argc, char *argv[])
 {
-    for (int d = 0; d < MAX_DEPTH; d++)
+    char compcolor = 'W', c[10];
+    int column_input, row_input;
+    int rx, ry, m = 0, n;
+    FILE *fp;
+
+    Init();
+
+    if (argc == 3)
     {
-        killers[d][0].x = killers[d][0].y = -1;
-        killers[d][1].x = killers[d][1].y = -1;
+        compcolor = *argv[1];
+        if (atoi(argv[2]) > 0)
+            search_deep = atoi(argv[2]);
+        printf("%c, %d\n", compcolor, search_deep);
     }
-}
-
-/* -------------------- Game logic (move generation / apply / undo) -------------------- */
-
-void init_board(GameState *g)
-{
-    int i, j;
-    for (i = 0; i < 8; i++)
-        for (j = 0; j < 8; j++)
-            g->board[i][j] = EMPTY;
-    // standard Othello starting position
-    g->board[3][3] = WHITE;
-    g->board[4][4] = WHITE;
-    g->board[3][4] = BLACK;
-    g->board[4][3] = BLACK;
-    g->turn = 0;       // black moves first
-    g->move_count = 1; // per spec starts at 1
-}
-
-int in_bounds(int x, int y) { return x >= 0 && x < 8 && y >= 0 && y < 8; }
-int opponent_color(int color) { return (color == BLACK) ? WHITE : BLACK; }
-int color_of_turn(GameState *g) { return (g->turn == 0) ? BLACK : WHITE; }
-
-/* Check legality and collect flips for a candidate move.
- * flips[] will store flipping squares; flip_count is out param.
- * Returns 1 if legal (flip_count>0), else 0.
- */
-int is_legal_move(GameState *g, int color, int x, int y, Move flips[], int *flip_count)
-{
-    if (!in_bounds(x, y) || g->board[x][y] != EMPTY)
-        return 0;
-    int fc = 0;
-    int opp = opponent_color(color);
-    for (int d = 0; d < 8; d++)
+    else if (argc == 2)
     {
-        int cx = x + DX[d];
-        int cy = y + DY[d];
-        int run = 0;
-        Move temp_flips[8];
-        int tf = 0;
-        while (in_bounds(cx, cy) && g->board[cx][cy] == opp)
-        {
-            temp_flips[tf].x = cx;
-            temp_flips[tf].y = cy;
-            tf++;
-            cx += DX[d];
-            cy += DY[d];
-            run++;
-            if (tf >= 8)
-                break;
-        }
-        if (run > 0 && in_bounds(cx, cy) && g->board[cx][cy] == color)
-        {
-            for (int k = 0; k < tf; k++)
-            {
-                flips[fc++] = temp_flips[k];
-                if (fc >= MAX_FLIPS)
-                    break;
-            }
-        }
-    }
-    *flip_count = fc;
-    return fc > 0;
-}
-
-/* Generate all legal moves for color. Also fills flipinfo: for each move index,
- * flipinfo[idx] contains the x,y pairs linearized as (x*8+y) for flips, and flipcounts[idx] the count.
- */
-int generate_moves(GameState *g, int color, Move moves[], int *n_moves, int flipinfo[][MAX_FLIPS], int flipcounts[])
-{
-    int n = 0;
-    Move flips[MAX_FLIPS];
-    int flipc;
-    for (int x = 0; x < 8; x++)
-    {
-        for (int y = 0; y < 8; y++)
-        {
-            if (is_legal_move(g, color, x, y, flips, &flipc))
-            {
-                moves[n].x = x;
-                moves[n].y = y;
-                flipcounts[n] = flipc;
-                for (int i = 0; i < flipc; i++)
-                {
-                    flipinfo[n][i] = flips[i].x * 8 + flips[i].y;
-                }
-                n++;
-                if (n >= MAX_LEGAL)
-                    break;
-            }
-        }
-        if (n >= MAX_LEGAL)
-            break;
-    }
-    *n_moves = n;
-    return n;
-}
-
-void apply_move_with_flips(GameState *g, int color, int x, int y, Move flips[], int flip_count)
-{
-    g->board[x][y] = color;
-    for (int i = 0; i < flip_count; i++)
-    {
-        int fx = flips[i].x;
-        int fy = flips[i].y;
-        g->board[fx][fy] = color;
-    }
-    // toggle turn and increment move counter
-    g->turn = 1 - g->turn;
-    g->move_count++;
-}
-
-void undo_move_with_flips(GameState *g, int color, int x, int y, Move flips[], int flip_count)
-{
-    int opp = opponent_color(color);
-    g->board[x][y] = EMPTY;
-    for (int i = 0; i < flip_count; i++)
-    {
-        int fx = flips[i].x;
-        int fy = flips[i].y;
-        g->board[fx][fy] = opp;
-    }
-    g->turn = 1 - g->turn;
-    g->move_count--;
-}
-
-/* -------------------- Counting helpers -------------------- */
-
-int count_disks(GameState *g, int color)
-{
-    int c = 0;
-    for (int i = 0; i < 8; i++)
-        for (int j = 0; j < 8; j++)
-            if (g->board[i][j] == color)
-                c++;
-    return c;
-}
-
-int count_legal_moves(GameState *g, int color)
-{
-    Move moves[MAX_LEGAL];
-    int n;
-    int flipinfo[MAX_LEGAL][MAX_FLIPS];
-    int flipcounts[MAX_LEGAL];
-    return generate_moves(g, color, moves, &n, flipinfo, flipcounts);
-}
-
-/* frontier: count color's disks adjacent to at least one empty */
-int count_frontier(GameState *g, int color)
-{
-    int cnt = 0;
-    for (int x = 0; x < 8; x++)
-        for (int y = 0; y < 8; y++)
-        {
-            if (g->board[x][y] != color)
-                continue;
-            int adjEmpty = 0;
-            for (int d = 0; d < 8; d++)
-            {
-                int nx = x + DX[d], ny = y + DY[d];
-                if (in_bounds(nx, ny) && g->board[nx][ny] == EMPTY)
-                {
-                    adjEmpty = 1;
-                    break;
-                }
-            }
-            if (adjEmpty)
-                cnt++;
-        }
-    return cnt;
-}
-
-/* Approximate stable pieces: count corners and contiguous edge chains anchored at corners.
- * This is a cheap approximate stability indicator (not full rigorous stability).
- */
-int count_stable_approx(GameState *g, int color)
-{
-    int stable = 0;
-    const int cx[4] = {0, 7, 0, 7};
-    const int cy[4] = {0, 0, 7, 7};
-    for (int k = 0; k < 4; k++)
-    {
-        int x = cx[k], y = cy[k];
-        if (g->board[x][y] == color)
-            stable += 1;
-    }
-    if (g->board[0][0] == color)
-    {
-        for (int x = 1; x < 8; x++)
-        {
-            if (g->board[x][0] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    if (g->board[7][0] == color)
-    {
-        for (int x = 6; x >= 0; x--)
-        {
-            if (g->board[x][0] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    if (g->board[0][7] == color)
-    {
-        for (int x = 1; x < 8; x++)
-        {
-            if (g->board[x][7] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    if (g->board[7][7] == color)
-    {
-        for (int x = 6; x >= 0; x--)
-        {
-            if (g->board[x][7] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    if (g->board[0][0] == color)
-    {
-        for (int y = 1; y < 8; y++)
-        {
-            if (g->board[0][y] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    if (g->board[0][7] == color)
-    {
-        for (int y = 6; y >= 0; y--)
-        {
-            if (g->board[0][y] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    if (g->board[7][0] == color)
-    {
-        for (int y = 1; y < 8; y++)
-        {
-            if (g->board[7][y] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    if (g->board[7][7] == color)
-    {
-        for (int y = 6; y >= 0; y--)
-        {
-            if (g->board[7][y] == color)
-                stable++;
-            else
-                break;
-        }
-    }
-    return stable;
-}
-
-/* -------------------- Evaluation functions -------------------- */
-
-/* exact_evaluate: endgame exact (final disc difference scaled) */
-int exact_evaluate(GameState *g, int color)
-{
-    int black = count_disks(g, BLACK);
-    int white = count_disks(g, WHITE);
-    int diff = black - white;
-    // scale by 100 for clarity, return from 'color' perspective
-    int val = diff * 100;
-    if (color == BLACK)
-        return val;
-    return -val;
-}
-
-/* evaluate: multi-factor evaluation from original implementation + enhancements:
- * returns value in "black advantage" scale. For negamax convenience, caller will
- * convert to side-to-move perspective.
- */
-int evaluate(GameState *g)
-{
-    int black_count = count_disks(g, BLACK);
-    int white_count = count_disks(g, WHITE);
-    int material = black_count - white_count; // positive favors black
-
-    int black_moves = count_legal_moves(g, BLACK);
-    int white_moves = count_legal_moves(g, WHITE);
-    double mobility = 0.0;
-    mobility = (log(black_moves + 1.0) - log(white_moves + 1.0));
-
-    int black_frontier = count_frontier(g, BLACK);
-    int white_frontier = count_frontier(g, WHITE);
-    double frontier_score = (white_frontier - black_frontier) * 0.5; // positive favors black
-
-    int black_stable = count_stable_approx(g, BLACK);
-    int white_stable = count_stable_approx(g, WHITE);
-    int stability = black_stable - white_stable;
-
-    int positional = 0;
-    for (int x = 0; x < 8; x++)
-        for (int y = 0; y < 8; y++)
-        {
-            if (g->board[x][y] == BLACK)
-                positional += POSVAL[y][x];
-            else if (g->board[x][y] == WHITE)
-                positional -= POSVAL[y][x];
-        }
-
-    int moves_played = g->move_count - 1; // since move_count starts at 1
-    double w1, w2, w3, w4, w5;
-    if (moves_played <= 15)
-    {
-        w1 = 0.1;
-        w2 = 2.0;
-        w3 = 0.5;
-        w4 = 1.0;
-        w5 = 0.3;
-    }
-    else if (moves_played <= 52)
-    {
-        w1 = 1.0;
-        w2 = 1.5;
-        w3 = 1.0;
-        w4 = 2.0;
-        w5 = 0.5;
+        compcolor = *argv[1];
     }
     else
     {
-        w1 = 10.0;
-        w2 = 0.0;
-        w3 = 2.0;
-        w4 = 0.5;
-        w5 = 0.0;
+        printf("Computer take?(B/W/All/File play as first/file play as Second/Load and play): ");
+        scanf("%c", &compcolor);
     }
 
-    double evald = 0.0;
-    evald += w1 * (double)material;
-    evald += w2 * mobility;
-    evald += w3 * (double)stability;
-    evald += w4 * (double)positional / 10.0; // scaled down
-    evald += w5 * frontier_score;
+    Show_Board_and_Set_Legal_Moves();
 
-    // Corner control bonus (enhancement)
-    int corners_controlled = 0;
-    const int corner_positions[4][2] = {{0, 0}, {7, 0}, {0, 7}, {7, 7}};
-    for (int i = 0; i < 4; i++)
-    {
-        int cx = corner_positions[i][0], cy = corner_positions[i][1];
-        if (g->board[cx][cy] == BLACK)
-            corners_controlled += 2;
-        else if (g->board[cx][cy] == WHITE)
-            corners_controlled -= 2;
-    }
-    evald += corners_controlled * 25.0;
+    if (compcolor == 'L' || compcolor == 'l')
+        compcolor = Load_File();
 
-    // Parity consideration (enhancement)
-    if (moves_played > 50)
+    if (compcolor == 'B' || compcolor == 'b')
     {
-        int remaining = 60 - moves_played;
-        if ((remaining % 2 == 0 && g->turn == 0))
-        {
-            // Black moves last when even remaining and black to move now
-            evald += 50.0;
-        }
-        else if ((remaining % 2 == 1 && g->turn == 1))
-        {
-            evald += 50.0;
-        }
+        Computer_Think(&rx, &ry);
+        printf("Computer played %c%d\n", rx + 97, ry + 1);
+        Play_a_Move(rx, ry);
+
+        Show_Board_and_Set_Legal_Moves();
     }
 
-    int eval = (int)round(evald * 10.0);
-    return eval; // positive favors Black
-}
-
-/* -------------------- Move ordering with killer heuristic -------------------- */
-
-void order_moves_by_heuristic(GameState *g, int color, Move moves[], int n, int order[], int ply)
-{
-    int scores[MAX_LEGAL];
-    for (int i = 0; i < n; i++)
-    {
-        int s = 0;
-        if (ply < MAX_DEPTH)
+    if (compcolor == 'A' || compcolor == 'a')
+        while (m++ < 64)
         {
-            if (moves[i].x == killers[ply][0].x && moves[i].y == killers[ply][0].y)
-                s += 100000;
-            else if (moves[i].x == killers[ply][1].x && moves[i].y == killers[ply][1].y)
-                s += 90000;
-        }
-        int x = moves[i].x, y = moves[i].y;
-        // Positional scaled
-        s += POSVAL[y][x] * 10;
-        // Favor corner strongly
-        if ((x == 0 && y == 0) || (x == 7 && y == 0) || (x == 0 && y == 7) || (x == 7 && y == 7))
-            s += 100000;
-        // Avoid X-squares
-        if ((x == 1 && y == 0) || (x == 0 && y == 1) || (x == 1 && y == 1) ||
-            (x == 6 && y == 0) || (x == 7 && y == 1) || (x == 6 && y == 1) ||
-            (x == 0 && y == 6) || (x == 1 && y == 7) || (x == 1 && y == 6) ||
-            (x == 6 && y == 7) || (x == 7 && y == 6) || (x == 6 && y == 6))
-            s -= 20000;
-        // flips count heuristic
-        Move flips[MAX_FLIPS];
-        int fc = 0;
-        if (is_legal_move(g, color, x, y, flips, &fc))
-            s += fc * 50;
-        scores[i] = s;
-        order[i] = i;
-    }
-    // simple sort indices by score descending
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = i + 1; j < n; j++)
-        {
-            if (scores[order[j]] > scores[order[i]])
+            Computer_Think(&rx, &ry);
+            if (!Play_a_Move(rx, ry))
             {
-                int tmp = order[i];
-                order[i] = order[j];
-                order[j] = tmp;
+                printf("Wrong Computer moves %c%d\n", rx + 97, ry + 1);
+                scanf("%d", &n);
+                break;
+            }
+            if (rx == -1)
+                printf("Computer Pass\n");
+            else
+                printf("Computer played %c%d\n", rx + 97, ry + 1);
+
+            if (Check_EndGame())
+                return 0;
+            Show_Board_and_Set_Legal_Moves();
+        }
+
+    if (compcolor == 'F')
+    {
+        printf("First/Black start!\n");
+        Computer_Think(&rx, &ry);
+        Play_a_Move(rx, ry);
+    }
+
+    while (m++ < 64)
+    {
+        while (1)
+        {
+            if (compcolor == 'F' || compcolor == 'S')
+            {
+                fp = fopen("of.txt", "r");
+                fscanf(fp, "%d", &n);
+                char tc[10];
+                if (compcolor == 'F')
+                {
+                    if (n % 2 == 0)
+                    {
+                        while ((fscanf(fp, "%s", tc)) != EOF)
+                        {
+                            c[0] = tc[0];
+                            c[1] = tc[1];
+                        }
+                        fclose(fp);
+
+                        if (c[0] == 'w')
+                            return 0;
+                        if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
+                        {
+                            printf("%s is wrong F\n", c);
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        fclose(fp);
+                        Delay(100);
+                        continue;
+                    }
+                }
+                else
+                {
+                    if (n % 2 == 1)
+                    {
+                        while ((fscanf(fp, "%s", tc)) != EOF)
+                        {
+                            c[0] = tc[0];
+                            c[1] = tc[1];
+                        }
+                        fclose(fp);
+                        if (c[0] == 'w')
+                            return 0;
+                        if (c[0] != 'p' && Now_Board[c[0] - 97][c[1] - 49] != 0)
+                        {
+                            printf("%s is wrong S\n", c);
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        fclose(fp);
+                        Delay(100);
+                        continue;
+                    }
+                }
+            }
+
+            if (compcolor == 'B')
+            {
+                printf("input White move:(a-h 1-8), or PASS\n");
+                scanf("%s", c);
+            }
+            else if (compcolor == 'W')
+            {
+                printf("input Black move:(a-h 1-8), or PASS\n");
+                scanf("%s", c);
+            }
+
+            if (c[0] == 'P' || c[0] == 'p')
+                row_input = column_input = -1;
+            else if (c[0] == 'M' || c[0] == 'm')
+            {
+                Computer_Think(&rx, &ry);
+                if (!Play_a_Move(rx, ry))
+                {
+                    printf("Wrong Computer moves %c%d\n", rx + 97, ry + 1);
+                    scanf("%d", &n);
+                    break;
+                }
+                if (rx == -1)
+                    printf("Computer Pass");
+                else
+                    printf("Computer played %c%d\n", rx + 97, ry + 1);
+                if (Check_EndGame())
+                    break;
+                Show_Board_and_Set_Legal_Moves();
+            }
+            else
+            {
+                row_input = c[0] - 97;
+                column_input = c[1] - 49;
+            }
+
+            if (!Play_a_Move(row_input, column_input))
+            {
+                printf("#%d, %c%d is a Wrong move\n", HandNumber, c[0], column_input + 1);
+                return 0;
+            }
+
+            else
+                break;
+        }
+        if (Check_EndGame())
+            return 0;
+        Show_Board_and_Set_Legal_Moves();
+
+        Computer_Think(&rx, &ry);
+        printf("Computer played %c%d\n", rx + 97, ry + 1);
+        Play_a_Move(rx, ry);
+        if (Check_EndGame())
+            return 0;
+        Show_Board_and_Set_Legal_Moves();
+    }
+
+    printf("Game is over!!");
+    printf("\n%d", argc);
+    if (argc <= 1)
+        scanf("%d", &n);
+
+    return 0;
+}
+//---------------------------------------------------------------------------
+void Delay(unsigned int mseconds)
+{
+    clock_t goal = mseconds + clock();
+    while (goal > clock())
+        ;
+}
+//---------------------------------------------------------------------------
+
+char Load_File(void)
+{
+    FILE *fp;
+    char tc[10];
+    int row_input, column_input, n;
+
+    fp = fopen("of.txt", "r");
+    assert(fp != NULL);
+
+    fscanf(fp, "%d", &n);
+
+    while ((fscanf(fp, "%s", tc)) != EOF)
+    {
+        row_input = tc[0] - 97;
+        column_input = tc[1] - 49;
+        if (!Play_a_Move(row_input, column_input))
+            printf("%c%d is a Wrong move\n", tc[0], column_input + 1);
+
+        Show_Board_and_Set_Legal_Moves();
+    }
+    fclose(fp);
+    return (n % 2 == 1) ? 'B' : 'W';
+}
+//---------------------------------------------------------------------------
+
+void Init()
+{
+    Total_Time = clock();
+
+    Computer_Take = 0;
+    memset(Now_Board, 0, sizeof(int) * Board_Size * Board_Size);
+
+    srand((unsigned int)time(NULL));
+    init_zobrist();
+    Now_Board[3][3] = Now_Board[4][4] = 2; // white, dark
+    Now_Board[3][4] = Now_Board[4][3] = 1; // black, light
+
+    HandNumber = 0;
+    memset(sequence, -1, sizeof(int) * 100);
+    Turn = 0;
+
+    LastX = LastY = -1;
+    Black_Count = White_Count = 0;
+
+    Search_Counter = 0;
+    Winner = 0;
+}
+//---------------------------------------------------------------------------
+
+int Play_a_Move(int x, int y)
+{
+    FILE *fp;
+
+    if (x == -1 && y == -1)
+    {
+        fp = fopen("of.txt", "r+");
+
+        fprintf(fp, "%2d\n", HandNumber + 1);
+        fclose(fp);
+
+        fp = fopen("of.txt", "a");
+        fprintf(fp, "p9\n");
+        fclose(fp);
+
+        sequence[HandNumber] = -1;
+        HandNumber++;
+        Turn = 1 - Turn;
+        return 1;
+    }
+
+    if (!In_Board(x, y))
+        return 0;
+    Find_Legal_Moves(Stones[Turn]);
+    if (Legal_Moves[x][y] == FALSE)
+        return 0;
+
+    if (Put_a_Stone(x, y))
+    {
+        Check_Cross(x, y, 1);
+
+        Compute_Grades(TRUE);
+        return 1;
+    }
+    else
+        return 0;
+}
+//---------------------------------------------------------------------------
+
+int Put_a_Stone(int x, int y)
+{
+    FILE *fp;
+
+    if (Now_Board[x][y] == 0)
+    {
+        sequence[HandNumber] = Turn;
+        if (HandNumber == 0)
+            fp = fopen("of.txt", "w");
+        else
+            fp = fopen("of.txt", "r+");
+        fprintf(fp, "%2d\n", HandNumber + 1);
+        HandNumber++;
+        fclose(fp);
+
+        Now_Board[x][y] = Stones[Turn];
+        fp = fopen("of.txt", "a");
+        fprintf(fp, "%c%d\n", x + 97, y + 1);
+        ;
+        fclose(fp);
+
+        LastX = x;
+        LastY = y;
+
+        Turn = 1 - Turn;
+
+        return TRUE;
+    }
+    return FALSE;
+}
+//---------------------------------------------------------------------------
+
+void Show_Board_and_Set_Legal_Moves(void)
+{
+    int i, j;
+
+    Find_Legal_Moves(Stones[Turn]);
+
+    printf("a b c d e f g h\n");
+    for (i = 0; i < Board_Size; i++)
+    {
+        for (j = 0; j < Board_Size; j++)
+        {
+            if (Now_Board[j][i] > 0)
+            {
+                if (Now_Board[j][i] == 2)
+                    printf("O "); // white
+                else
+                    printf("X "); // black
+            }
+
+            if (Now_Board[j][i] == 0)
+            {
+                if (Legal_Moves[j][i] == 1)
+                    printf("? ");
+                else
+                    printf(". ");
+            }
+        }
+        printf(" %d\n", i + 1);
+    }
+    printf("\n");
+}
+//---------------------------------------------------------------------------
+
+int Find_Legal_Moves(int color)
+{
+    int i, j;
+    int me = color;
+    int legal_count = 0;
+
+    for (i = 0; i < Board_Size; i++)
+        for (j = 0; j < Board_Size; j++)
+            Legal_Moves[i][j] = 0;
+
+    for (i = 0; i < Board_Size; i++)
+        for (j = 0; j < Board_Size; j++)
+            if (Now_Board[i][j] == 0)
+            {
+                Now_Board[i][j] = me;
+                if (Check_Cross(i, j, FALSE) == TRUE)
+                {
+                    Legal_Moves[i][j] = TRUE;
+                    legal_count++;
+                }
+                Now_Board[i][j] = 0;
+            }
+
+    return legal_count;
+}
+//---------------------------------------------------------------------------
+
+int Check_Cross(int x, int y, int update)
+{
+    int k;
+    int dx, dy;
+
+    if (!In_Board(x, y) || Now_Board[x][y] == 0)
+        return FALSE;
+
+    {
+        int army = 3 - Now_Board[x][y];
+        int army_count = 0;
+
+        for (k = 0; k < 8; k++)
+        {
+            dx = x + DirX[k];
+            dy = y + DirY[k];
+            if (In_Board(dx, dy) && Now_Board[dx][dy] == army)
+            {
+                army_count += Check_Straight_Army(x, y, k, update);
+            }
+        }
+
+        if (army_count > 0)
+            return TRUE;
+        else
+            return FALSE;
+    }
+}
+//---------------------------------------------------------------------------
+
+int Check_Straight_Army(int x, int y, int d, int update)
+{
+    int me = Now_Board[x][y];
+    int army = 3 - me;
+    int army_count = 0;
+    int found_flag = FALSE;
+    int flag[Board_Size][Board_Size] = {{0}};
+
+    int i, j;
+    int tx, ty;
+
+    tx = x;
+    ty = y;
+
+    for (i = 0; i < Board_Size; i++)
+    {
+        tx += DirX[d];
+        ty += DirY[d];
+
+        if (In_Board(tx, ty))
+        {
+            if (Now_Board[tx][ty] == army)
+            {
+                army_count++;
+                flag[tx][ty] = TRUE;
+            }
+            else if (Now_Board[tx][ty] == me)
+            {
+                found_flag = TRUE;
+                break;
+            }
+            else
+                break;
+        }
+        else
+            break;
+    }
+
+    if ((found_flag == TRUE) && (army_count > 0) && update)
+    {
+        for (i = 0; i < Board_Size; i++)
+            for (j = 0; j < Board_Size; j++)
+                if (flag[i][j] == TRUE)
+                {
+                    if (Now_Board[i][j] != 0)
+                        Now_Board[i][j] = 3 - Now_Board[i][j];
+                }
+    }
+    if ((found_flag == TRUE) && (army_count > 0))
+        return army_count;
+    else
+        return 0;
+}
+//---------------------------------------------------------------------------
+
+int In_Board(int x, int y)
+{
+    if (x >= 0 && x < Board_Size && y >= 0 && y < Board_Size)
+        return TRUE;
+    else
+        return FALSE;
+}
+//---------------------------------------------------------------------------
+
+int Compute_Grades(int flag)
+{
+    int i, j;
+    int B = 0, W = 0;
+    int BW = 0, WW = 0;
+    int frontierB = 0, frontierW = 0;
+
+    // Disc counts and positional weights
+    for (i = 0; i < Board_Size; ++i)
+    {
+        for (j = 0; j < Board_Size; ++j)
+        {
+            if (Now_Board[i][j] == 1)
+            {
+                B++;
+                BW += board_weight[i][j];
+            }
+            else if (Now_Board[i][j] == 2)
+            {
+                W++;
+                WW += board_weight[i][j];
             }
         }
     }
+
+    // Frontier discs (stones adjacent to at least one empty square)
+    for (i = 0; i < Board_Size; ++i)
+    {
+        for (j = 0; j < Board_Size; ++j)
+        {
+            if (Now_Board[i][j] == 0)
+                continue;
+
+            int k;
+            int isFrontier = 0;
+            for (k = 0; k < 8; ++k)
+            {
+                int nx = i + DirX[k];
+                int ny = j + DirY[k];
+                if (In_Board(nx, ny) && Now_Board[nx][ny] == 0)
+                {
+                    isFrontier = 1;
+                    break;
+                }
+            }
+
+            if (isFrontier)
+            {
+                if (Now_Board[i][j] == 1)
+                    frontierB++;
+                else if (Now_Board[i][j] == 2)
+                    frontierW++;
+            }
+        }
+    }
+
+    // Mobility
+    int mobilityBlack = Find_Legal_Moves(1);
+    int mobilityWhite = Find_Legal_Moves(2);
+
+    int totalDiscs = B + W;
+    int stage = 0;
+    if (totalDiscs > 0)
+        stage = (totalDiscs * 100) / (Board_Size * Board_Size); // 0..100
+
+    // Normalized differences
+    int discDiffPerc = 0;
+    int posDiffPerc = 0;
+    int mobDiffPerc = 0;
+    int frontierDiffPerc = 0;
+
+    if (B + W != 0)
+        discDiffPerc = 100 * (B - W) / (B + W);
+
+    if (BW + WW != 0)
+        posDiffPerc = 100 * (BW - WW) / (BW + WW);
+
+    if (mobilityBlack + mobilityWhite != 0)
+        mobDiffPerc = 100 * (mobilityBlack - mobilityWhite) / (mobilityBlack + mobilityWhite);
+
+    if (frontierB + frontierW != 0)
+        frontierDiffPerc = 100 * (frontierW - frontierB) / (frontierB + frontierW); // prefer fewer frontier
+
+    // Game phase dependent weights
+    int wDisc = 10 + stage;     // more important late
+    int wPos = 100 - stage / 2; // slightly less important late
+    int wMob = 100 - stage;     // opening/midgame
+    int wFront = 100 - stage;   // opening/midgame
+
+    int score = 0;
+    score += wPos * posDiffPerc;
+    score += wMob * mobDiffPerc;
+    score += wFront * frontierDiffPerc;
+    score += wDisc * discDiffPerc;
+
+    score /= 10; // keep scale reasonable
+
+    if (flag)
+    {
+        Black_Count = B;
+        White_Count = W;
+        printf("#%d Grade: Black %d, White %d\n", HandNumber, B, W);
+    }
+
+    // Positive score means advantage for Black, negative for White.
+    return score;
 }
+//---------------------------------------------------------------------------
 
-/* -------------------- Negamax with alpha-beta, transposition table, killers, endgame -------------------- */
-
-/*
- * Returns score from perspective of 'color' (player to move).
- * Standard negamax: score = max( -(negamax after move for opponent) )
- */
-int negamax(GameState *g, int depth, int alpha, int beta, int color, Move *bestmove, int ply)
+int Check_EndGame(void)
 {
-    if (depth < 0)
-        depth = 0;
-    // End conditions
-    if (is_game_over(g))
+    int i, j;
+    FILE *fp;
+
+    Black_Count = White_Count = 0;
+    for (i = 0; i < Board_Size; i++)
+        for (j = 0; j < Board_Size; j++)
+            if (Now_Board[i][j] == 1)
+                Black_Count++;
+            else if (Now_Board[i][j] == 2)
+                White_Count++;
+
+    if (Black_Count + White_Count == Board_Size * Board_Size)
     {
-        // final exact score
-        return exact_evaluate(g, color);
+        fp = fopen("of.txt", "a");
+        Total_Time = clock() - Total_Time;
+
+        if (HandNumber % 2 == 1)
+        {
+            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
+            fprintf(fp, "Black used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
+        }
+        else
+        {
+            fprintf(fp, "Total used time= %d min. %d sec.\n", Total_Time / 60000, (Total_Time % 60000) / 1000);
+            fprintf(fp, "White used time= %d min. %d sec.\n", Think_Time / 60000, (Think_Time % 60000) / 1000);
+        }
+
+        if (Black_Count > White_Count)
+        {
+            printf("Black(F) Win!\n");
+            fprintf(fp, "wB%d\n", Black_Count - White_Count);
+            if (Winner == 0)
+                Winner = 1;
+        }
+        else if (Black_Count < White_Count)
+        {
+            printf("White(S) Win!\n");
+            fprintf(fp, "wW%d\n", White_Count - Black_Count);
+            if (Winner == 0)
+                Winner = 2;
+        }
+        else
+        {
+            printf("Draw\n");
+            fprintf(fp, "wZ%d\n", White_Count - Black_Count);
+            Winner = 0;
+        }
+        fclose(fp);
+
+        Show_Board_and_Set_Legal_Moves();
+        printf("Game is over");
+        return TRUE;
     }
 
-    int moves_remaining = 64 - (g->move_count - 1);
-    if (moves_remaining <= 12)
-    {
-        // endgame: search to end exactly
-        int new_depth = moves_remaining;
-        if (depth > new_depth)
-            depth = new_depth;
-        // Allow search to go to depth (we'll not special-case further here)
-    }
+    return FALSE;
+}
+//---------------------------------------------------------------------------
 
-    // compute hash and probe TT
-    unsigned long long h = compute_hash(g);
-    int hash_value, hash_flag;
-    if (probe_hash(h, depth, &hash_value, &hash_flag))
+int negamax(int depth, int alpha, int beta, int myturn)
+{
+    int moveCount;
+    int opponentMoves;
+    int bestVal = -INF;
+    int originalAlpha = alpha;
+
+    unsigned long long key = compute_hash(myturn);
+    int index = (int)(key & (TT_SIZE - 1));
+    TTEntry *entry = &transTable[index];
+
+    Search_Counter++;
+
+    // TT lookup
+    if (entry->key == key && entry->depth >= depth)
     {
-        if (hash_flag == 0)
-        {
-            // exact
-            return (color == BLACK) ? hash_value : -hash_value;
-        }
-        else if (hash_flag == 1)
-        {
-            // lower bound
-            if (hash_value > alpha)
-                alpha = hash_value;
-        }
-        else if (hash_flag == 2)
-        {
-            // upper bound
-            if (hash_value < beta)
-                beta = hash_value;
-        }
+        if (entry->flag == TT_FLAG_EXACT)
+            return entry->value;
+        else if (entry->flag == TT_FLAG_LOWER && entry->value > alpha)
+            alpha = entry->value;
+        else if (entry->flag == TT_FLAG_UPPER && entry->value < beta)
+            beta = entry->value;
+
         if (alpha >= beta)
+            return entry->value;
+    }
+
+    moveCount = Find_Legal_Moves(Stones[myturn]);
+    if (moveCount == 0)
+    {
+        opponentMoves = Find_Legal_Moves(Stones[1 - myturn]);
+        if (depth == 0 || opponentMoves == 0)
         {
-            return (color == BLACK) ? hash_value : -hash_value;
+            int eval = (myturn == 0 ? 1 : -1) * Compute_Grades(FALSE);
+            entry->key = key;
+            entry->depth = depth;
+            entry->value = eval;
+            entry->flag = TT_FLAG_EXACT;
+            return eval;
+        }
+        // pass move
+        {
+            int val = -negamax(depth - 1, -beta, -alpha, 1 - myturn);
+            entry->key = key;
+            entry->depth = depth;
+            entry->value = val;
+            if (val <= originalAlpha)
+                entry->flag = TT_FLAG_UPPER;
+            else if (val >= beta)
+                entry->flag = TT_FLAG_LOWER;
+            else
+                entry->flag = TT_FLAG_EXACT;
+            return val;
         }
     }
 
     if (depth == 0)
     {
-        int ev = evaluate(g);
-        // evaluate returns black-advantage; convert to 'color' perspective
-        return (color == BLACK) ? ev : -ev;
+        int eval = (myturn == 0 ? 1 : -1) * Compute_Grades(FALSE);
+        entry->key = key;
+        entry->depth = depth;
+        entry->value = eval;
+        entry->flag = TT_FLAG_EXACT;
+        return eval;
     }
 
-    // generate moves
-    Move moves[MAX_LEGAL];
-    int n;
-    int flipinfo[MAX_LEGAL][MAX_FLIPS];
-    int flipcounts[MAX_LEGAL];
-    generate_moves(g, color, moves, &n, flipinfo, flipcounts);
-
-    if (n == 0)
+    // Generate & order moves
     {
-        // pass
-        // If opponent also has no moves, handled by is_game_over earlier
-        g->turn = 1 - g->turn;
-        g->move_count++;
-        int val = -negamax(g, depth - 1, -beta, -alpha, opponent_color(color), NULL, ply + 1);
-        g->turn = 1 - g->turn;
-        g->move_count--;
-        return val;
-    }
-
-    int order[MAX_LEGAL];
-    order_moves_by_heuristic(g, color, moves, n, order, ply);
-
-    int best_val = -INF;
-    Move local_best = {-1, -1};
-
-    for (int idx = 0; idx < n; idx++)
-    {
-        int i = order[idx];
-        Move flips[MAX_FLIPS];
-        int fc = flipcounts[i];
-        for (int k = 0; k < fc; k++)
-        {
-            int v = flipinfo[i][k];
-            flips[k].x = v / 8;
-            flips[k].y = v % 8;
-        }
-        apply_move_with_flips(g, color, moves[i].x, moves[i].y, flips, fc);
-
-        int val = -negamax(g, depth - 1, -beta, -alpha, opponent_color(color), NULL, ply + 1);
-
-        undo_move_with_flips(g, color, moves[i].x, moves[i].y, flips, fc);
-
-        if (val > best_val)
-        {
-            best_val = val;
-            local_best = moves[i];
-        }
-        if (best_val > alpha)
-            alpha = best_val;
-        if (alpha >= beta)
-        {
-            // record killer
-            if (ply < MAX_DEPTH)
-            {
-                if (!(moves[i].x == killers[ply][0].x && moves[i].y == killers[ply][0].y))
+        Move moves[Board_Size * Board_Size];
+        int m = 0;
+        int i, j;
+        for (i = 0; i < Board_Size; ++i)
+            for (j = 0; j < Board_Size; ++j)
+                if (Legal_Moves[i][j] == TRUE)
                 {
-                    killers[ply][1] = killers[ply][0];
-                    killers[ply][0] = moves[i];
+                    moves[m].x = i;
+                    moves[m].y = j;
+                    moves[m].score = move_heuristic(i, j);
+                    m++;
                 }
-            }
-            break;
-        }
-    }
 
-    // store in transposition table
-    int store_flag = 0;
-    if (best_val <= alpha)
-        store_flag = 2; // upper bound
-    else if (best_val >= beta)
-        store_flag = 1; // lower bound
-    else
-        store_flag = 0; // exact
-
-    // store value in BLACK-advantage reference for consistency
-    int store_value = (color == BLACK) ? best_val : -best_val;
-    store_hash(h, depth, store_value, store_flag);
-
-    if (bestmove)
-        *bestmove = local_best;
-    return best_val;
-}
-
-/* -------------------- File I/O (of.txt) -------------------- */
-
-/* Convert coords to algebraic "c4" style */
-void coords_to_notation(char *s, int x, int y)
-{
-    s[0] = 'a' + x;
-    s[1] = '1' + y;
-    s[2] = 0;
-}
-
-/* Parse "c4" or "p9" */
-int notation_to_coords(const char *s, int *x, int *y)
-{
-    if (s == NULL || s[0] == 0)
-        return 0;
-    if (s[0] == 'p')
-    { // pass
-        *x = -1;
-        *y = -1;
-        return 1;
-    }
-    if (s[0] < 'a' || s[0] > 'h')
-        return 0;
-    if (s[1] < '1' || s[1] > '8')
-        return 0;
-    *x = s[0] - 'a';
-    *y = s[1] - '1';
-    return 1;
-}
-
-/* Load game from of.txt and reconstruct GameState */
-int load_game_from_file(GameState *g, char moves_out[][4], int *moves_n)
-{
-    FILE *fp = fopen("of.txt", "r");
-    if (!fp)
-        return 0;
-    int count = 0;
-    if (fscanf(fp, "%d", &count) != 1)
-    {
-        fclose(fp);
-        return 0;
-    }
-    char buf[16];
-    int n = 0;
-    while (fscanf(fp, "%s", buf) == 1)
-    {
-        if (n < MAX_MOVES)
+        // TT best move ordering bonus if available
+        if (entry->key == key && entry->bestX >= 0 && entry->bestY >= 0)
         {
-            strncpy(moves_out[n], buf, 4);
-            moves_out[n][3] = 0;
+            for (int t = 0; t < m; ++t)
+                if (moves[t].x == entry->bestX && moves[t].y == entry->bestY)
+                    moves[t].score += 1000000;
         }
-        n++;
-    }
-    fclose(fp);
-    *moves_n = n;
-    // reconstruct
-    init_board(g);
-    for (int i = 0; i < n; i++)
-    {
-        char *m = moves_out[i];
-        if (m[0] == 'w')
-        { // game over marker or weird
-            break;
-        }
-        if (m[0] == 'p')
-        {
-            g->turn = 1 - g->turn;
-            g->move_count++;
-            continue;
-        }
-        int x, y;
-        if (!notation_to_coords(m, &x, &y))
-            continue;
-        int color = color_of_turn(g);
-        Move flips[MAX_FLIPS];
-        int fc = 0;
-        if (!is_legal_move(g, color, x, y, flips, &fc))
-        {
-            // resilience: place without flips (rare), to avoid crash
-            g->board[x][y] = color;
-            g->turn = 1 - g->turn;
-            g->move_count++;
-        }
-        else
-        {
-            apply_move_with_flips(g, color, x, y, flips, fc);
-        }
-    }
-    return 1;
-}
 
-/* Overwrite of.txt with appended move */
-int append_move_to_oftxt(GameState *g, const char *move_str)
-{
-    // Read existing moves
-    FILE *fp = fopen("of.txt", "r");
-    char moves[MAX_MOVES][8];
-    int n = 0;
-    if (fp)
-    {
-        int cnt;
-        if (fscanf(fp, "%d", &cnt) == 1)
+        // sort by heuristic descending (insertion sort)
+        for (int a = 1; a < m; ++a)
         {
-            char buf[16];
-            while (fscanf(fp, "%s", buf) == 1 && n < MAX_MOVES)
+            Move keyMove = moves[a];
+            int b = a - 1;
+            while (b >= 0 && moves[b].score < keyMove.score)
             {
-                strncpy(moves[n], buf, 7);
-                moves[n][7] = 0;
-                n++;
+                moves[b + 1] = moves[b];
+                b--;
             }
-        }
-        fclose(fp);
-    }
-    // Append the move_str
-    if (n < MAX_MOVES)
-    {
-        strncpy(moves[n], move_str, 7);
-        moves[n][7] = 0;
-        n++;
-    }
-    else
-        return 0;
-
-    // Write whole file
-    fp = fopen("of.txt", "w");
-    if (!fp)
-        return 0;
-    fprintf(fp, "%2d", n);
-    for (int i = 0; i < n; i++)
-    {
-        fprintf(fp, "%s\n", moves[i]);
-    }
-    fclose(fp);
-    return 1;
-}
-
-/* Write pass: uses append_move_to_oftxt */
-void write_pass(GameState *g)
-{
-    append_move_to_oftxt(g, "p9");
-}
-
-/* Play move and append to file with updated count */
-void play_and_write_move(GameState *g, int x, int y)
-{
-    char m[8];
-    if (x < 0)
-    {
-        write_pass(g);
-        g->turn = 1 - g->turn;
-        g->move_count++;
-        return;
-    }
-    coords_to_notation(m, x, y);
-    append_move_to_oftxt(g, m);
-}
-
-/* -------------------- Utility / I/O / Human interaction -------------------- */
-
-void print_board(GameState *g)
-{
-    printf("  a b c d e f g h\n");
-    for (int y = 0; y < 8; y++)
-    {
-        printf("%d ", y + 1);
-        for (int x = 0; x < 8; x++)
-        {
-            char c = '.';
-            if (g->board[x][y] == BLACK)
-                c = 'B';
-            if (g->board[x][y] == WHITE)
-                c = 'W';
-            printf("%c ", c);
-        }
-        printf("\n");
-    }
-    printf("Move count: %d  Turn: %s\n", g->move_count, g->turn == 0 ? "Black" : "White");
-}
-
-int get_human_move(GameState *g, int *rx, int *ry)
-{
-    char s[16];
-    printf("Enter move (e.g. c4) or 'p' to pass: ");
-    if (!fgets(s, sizeof(s), stdin))
-        return 0;
-    char *nl = strchr(s, '\n');
-    if (nl)
-        *nl = 0;
-    if (s[0] == 'p' || s[0] == 'P')
-    {
-        *rx = -1;
-        *ry = -1;
-        return 1;
-    }
-    int x, y;
-    if (!notation_to_coords(s, &x, &y))
-    {
-        printf("Invalid notation.\n");
-        return 0;
-    }
-    Move flips[MAX_FLIPS];
-    int fc = 0;
-    int color = color_of_turn(g);
-    if (!is_legal_move(g, color, x, y, flips, &fc))
-    {
-        printf("Illegal move.\n");
-        return 0;
-    }
-    *rx = x;
-    *ry = y;
-    return 1;
-}
-
-void print_help()
-{
-    printf("Ot8b usage:\n");
-    printf(" ./Ot8b            # interactive (menu)\n");
-    printf(" ./Ot8b F [depth]  # play as First (Black)\n");
-    printf(" ./Ot8b S [depth]  # play as Second (White)\n");
-    printf(" ./Ot8b A [depth]  # auto play both\n");
-    printf(" ./Ot8b B          # Human vs Computer (Human Black)\n");
-    printf(" ./Ot8b W          # Human vs Computer (Human White)\n");
-    printf(" ./Ot8b L          # Load game from of.txt and continue\n");
-}
-
-/* -------------------- Opening book (small stub) -------------------- */
-
-typedef struct
-{
-    int move_num;
-    int x, y;
-    int strength;
-} BookMove;
-
-static BookMove opening_book[] = {
-    {1, 2, 3, 100}, // c4 as Black's first move (example)
-    {-1, -1, -1, 0}};
-
-int check_opening_book(GameState *g, int *out_x, int *out_y)
-{
-    for (int i = 0; opening_book[i].move_num != -1; i++)
-    {
-        if (opening_book[i].move_num == g->move_count)
-        {
-            *out_x = opening_book[i].x;
-            *out_y = opening_book[i].y;
-            // ensure move is legal before returning
-            Move flips[MAX_FLIPS];
-            int fc = 0;
-            int color = color_of_turn(g);
-            if (is_legal_move(g, color, *out_x, *out_y, flips, &fc))
-                return 1;
-        }
-    }
-    return 0;
-}
-
-/* -------------------- Choose best move wrapper -------------------- */
-
-int choose_best_move(GameState *g, int depth, int *out_x, int *out_y)
-{
-    // Opening book check
-    if (check_opening_book(g, out_x, out_y))
-    {
-        return 1;
-    }
-
-    int color = color_of_turn(g);
-    Move moves[MAX_LEGAL];
-    int n;
-    int flipinfo[MAX_LEGAL][MAX_FLIPS];
-    int flipcounts[MAX_LEGAL];
-    generate_moves(g, color, moves, &n, flipinfo, flipcounts);
-    if (n == 0)
-    {
-        *out_x = -1;
-        *out_y = -1; // pass
-        return 1;
-    }
-
-    Move bestm = {-1, -1};
-    int bestv = -INF;
-    // call negamax with given depth, ply=0
-    Move tmp;
-    int val = negamax(g, depth, -INF, INF, color, &tmp, 0);
-    if (tmp.x == -1)
-    {
-        // fallback: choose highest positional if negamax didn't set
-        *out_x = moves[0].x;
-        *out_y = moves[0].y;
-    }
-    else
-    {
-        *out_x = tmp.x;
-        *out_y = tmp.y;
-    }
-    return 1;
-}
-
-/* -------------------- Main program & modes -------------------- */
-
-int load_or_init_oftxt()
-{
-    FILE *fp = fopen("of.txt", "r");
-    if (!fp)
-    {
-        fp = fopen("of.txt", "w");
-        if (fp)
-        {
-            fprintf(fp, "%2d\n", 0);
-            fclose(fp);
-            return 0;
-        }
-        return 0;
-    }
-    fclose(fp);
-    return 1;
-}
-
-int main(int argc, char *argv[])
-{
-    init_zobrist();
-    init_killers();
-    GameState g;
-    init_board(&g);
-    int depth = 6; // default
-    int moves_n = 0;
-
-    /* Auto-play / engine modes */
-    if (argv[1][0] == 'S')
-    {
-        load_or_init_oftxt();
-        char moves[MAX_MOVES][4];
-        if (load_game_from_file(&g, moves, &moves_n))
-        {
-            /* loaded */
+            moves[b + 1] = keyMove;
         }
 
-        while (!is_game_over(&g))
         {
-            load_or_init_oftxt();
-            char moves[MAX_MOVES][4];
-            if (load_game_from_file(&g, moves, &moves_n))
+            int B[Board_Size][Board_Size];
+            int idxMove;
+            int bestX = -1, bestY = -1;
+
+            for (idxMove = 0; idxMove < m; ++idxMove)
             {
-                /* loaded */
+                int x = moves[idxMove].x;
+                int y = moves[idxMove].y;
+                int val;
+
+                memcpy(B, Now_Board, sizeof(int) * Board_Size * Board_Size);
+                Now_Board[x][y] = Stones[myturn];
+                Check_Cross(x, y, TRUE);
+
+                val = -negamax(depth - 1, -beta, -alpha, 1 - myturn);
+
+                memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size);
+
+                if (val > bestVal)
+                {
+                    bestVal = val;
+                    bestX = x;
+                    bestY = y;
+                }
+                if (val > alpha)
+                    alpha = val;
+                if (alpha_beta_option && alpha >= beta)
+                    break;
             }
 
-            // print_board(&g);
-            // printf("\n turn: %d\n", g.turn);
+            entry->key = key;
+            entry->depth = depth;
+            entry->value = bestVal;
+            entry->bestX = bestX;
+            entry->bestY = bestY;
 
-            // if (g.move_count == 3) return 0;
-
-            if (g.turn != WHITE)
-            {
-                continue;
-            }
+            if (bestVal <= originalAlpha)
+                entry->flag = TT_FLAG_UPPER;
+            else if (bestVal >= beta)
+                entry->flag = TT_FLAG_LOWER;
             else
-            {
-                // int color = color_of_turn(&g);
-                int color = WHITE;
-                int moves_avail = count_legal_moves(&g, color);
-                if (moves_avail == 0)
-                {
-                    printf("%s passes.\n", "White");
-                    g.turn = 1 - g.turn;
-                    g.move_count++;
-                    append_move_to_oftxt(&g, "p9");
-                    continue;
-                }
-                int bx, by;
-                choose_best_move(&g, depth, &bx, &by);
-                if (bx < 0)
-                {
-                    g.turn = 1 - g.turn;
-                    g.move_count++;
-                    append_move_to_oftxt(&g, "p9");
-                    printf("%s passes (no legal).\n", "White");
-                }
-                else
-                {
-                    Move flips[MAX_FLIPS];
-                    int fc = 0;
-                    is_legal_move(&g, color, bx, by, flips, &fc);
-                    apply_move_with_flips(&g, color, bx, by, flips, fc);
-                    char m[8];
-                    coords_to_notation(m, bx, by);
-                    append_move_to_oftxt(&g, m);
-                    printf("%s plays %s\n", "White", m);
-                }
-                print_board(&g);
-            }
+                entry->flag = TT_FLAG_EXACT;
         }
-
-
-        // while (!is_game_over(&g))
-        // {
-        //     int color = color_of_turn(&g);
-        //     int moves_avail = count_legal_moves(&g, color);
-        //     if (moves_avail == 0)
-        //     {
-        //         printf("%s passes.\n", color == BLACK ? "Black" : "White");
-        //         g.turn = 1 - g.turn;
-        //         g.move_count++;
-        //         append_move_to_oftxt(&g, "p9");
-        //         continue;
-        //     }
-        //     int bx, by;
-        //     choose_best_move(&g, depth, &bx, &by);
-        //     if (bx < 0)
-        //     {
-        //         g.turn = 1 - g.turn;
-        //         g.move_count++;
-        //         append_move_to_oftxt(&g, "p9");
-        //         printf("%s passes (no legal).\n", color == BLACK ? "Black" : "White");
-        //     }
-        //     else
-        //     {
-        //         Move flips[MAX_FLIPS];
-        //         int fc = 0;
-        //         is_legal_move(&g, color, bx, by, flips, &fc);
-        //         apply_move_with_flips(&g, color, bx, by, flips, fc);
-        //         char m[8];
-        //         coords_to_notation(m, bx, by);
-        //         append_move_to_oftxt(&g, m);
-        //         printf("%s plays %s\n", color == BLACK ? "Black" : "White", m);
-        //     }
-        //     print_board(&g);
-        // }
-        printf("Auto-play finished.\n");
-        int b = count_disks(&g, BLACK), w = count_disks(&g, WHITE);
-        printf("Final score - Black: %d  White: %d\n", b, w);
-        return 0;
     }
 
-    /* Default: single engine move for current turn */
-    printf("Default engine single move.\n");
-    print_board(&g);
-    int bx, by;
-    choose_best_move(&g, depth, &bx, &by);
-    if (bx < 0)
+    return bestVal;
+}
+
+int negamax_root(int depth, int myturn, int *outX, int *outY)
+{
+    int moveCount = Find_Legal_Moves(Stones[myturn]);
+    if (moveCount <= 0)
     {
-        printf("Engine passes.\n");
-        append_move_to_oftxt(&g, "p9");
-        g.turn = 1 - g.turn;
-        g.move_count++;
+        *outX = *outY = -1;
+        return -INF;
+    }
+
+    Move moves[Board_Size * Board_Size];
+    int m = 0;
+    int i, j;
+
+    for (i = 0; i < Board_Size; ++i)
+        for (j = 0; j < Board_Size; ++j)
+            if (Legal_Moves[i][j] == TRUE)
+            {
+                moves[m].x = i;
+                moves[m].y = j;
+                moves[m].score = move_heuristic(i, j);
+                m++;
+            }
+
+    // Root: use TT best move for ordering if available
+    {
+        unsigned long long key = compute_hash(myturn);
+        int index = (int)(key & (TT_SIZE - 1));
+        TTEntry *entry = &transTable[index];
+        if (entry->key == key && entry->bestX >= 0 && entry->bestY >= 0)
+        {
+            for (int t = 0; t < m; ++t)
+                if (moves[t].x == entry->bestX && moves[t].y == entry->bestY)
+                    moves[t].score += 1000000;
+        }
+    }
+
+    // sort moves by heuristic descending (insertion sort)
+    for (int a = 1; a < m; ++a)
+    {
+        Move keyMove = moves[a];
+        int b = a - 1;
+        while (b >= 0 && moves[b].score < keyMove.score)
+        {
+            moves[b + 1] = moves[b];
+            b--;
+        }
+        moves[b + 1] = keyMove;
+    }
+
+    {
+        int bestVal = -INF;
+        int alpha = -INF;
+        int beta = INF;
+        int B[Board_Size][Board_Size];
+        int idxMove;
+
+        *outX = *outY = -1;
+
+        for (idxMove = 0; idxMove < m; ++idxMove)
+        {
+            int x = moves[idxMove].x;
+            int y = moves[idxMove].y;
+            int val;
+
+            memcpy(B, Now_Board, sizeof(int) * Board_Size * Board_Size);
+            Now_Board[x][y] = Stones[myturn];
+            Check_Cross(x, y, TRUE);
+
+            val = -negamax(depth - 1, -beta, -alpha, 1 - myturn);
+
+            memcpy(Now_Board, B, sizeof(int) * Board_Size * Board_Size);
+
+            if (val > bestVal)
+            {
+                bestVal = val;
+                *outX = x;
+                *outY = y;
+            }
+            if (val > alpha)
+                alpha = val;
+        }
+
+        return bestVal;
+    }
+}
+
+int Search(int myturn, int mylevel)
+{
+    int legal;
+    int empty;
+    int maxDepth;
+    int d;
+
+    (void)mylevel; // unused
+
+    legal = Find_Legal_Moves(Stones[myturn]);
+    if (legal <= 0)
+        return FALSE;
+
+    empty = count_empty();
+    maxDepth = search_deep;
+
+    // Extend deeper in late game
+    if (empty <= 14 && empty < maxDepth)
+        maxDepth = empty;
+
+    resultX = resultY = -1;
+
+    // Iterative deepening for better move ordering and TT usage
+    for (d = 1; d <= maxDepth; ++d)
+    {
+        int x = -1, y = -1;
+        negamax_root(d, myturn, &x, &y);
+        if (x != -1 && y != -1)
+        {
+            resultX = x;
+            resultY = y;
+        }
+    }
+
+    return (resultX != -1 && resultY != -1);
+}
+
+int search_next(int x, int y, int myturn, int mylevel, int alpha, int beta)
+{
+    // Legacy interface not used by new search; keep stub for compatibility.
+    (void)x;
+    (void)y;
+    (void)myturn;
+    (void)mylevel;
+    (void)alpha;
+    (void)beta;
+    return Compute_Grades(FALSE);
+}
+//---------------------------------------------------------------------------
+
+void Computer_Think(int *x, int *y)
+{
+    time_t clockBegin, clockEnd;
+    int flag;
+
+    clockBegin = clock();
+
+    resultX = resultY = -1;
+    Search_Counter = 0;
+
+    flag = Search(Turn, 0);
+
+    clockEnd = clock();
+    {
+        int tinterval = (int)(clockEnd - clockBegin);
+        Think_Time += tinterval;
+        if (tinterval < 200)
+            Delay((unsigned int)(200 - tinterval));
+    }
+    printf("used thinking time= %d min. %d.%d sec.\n",
+           Think_Time / 60000,
+           (Think_Time % 60000) / 1000,
+           (Think_Time % 60000) % 1000);
+
+    if (flag)
+    {
+        *x = resultX;
+        *y = resultY;
     }
     else
     {
-        Move flips[MAX_FLIPS];
-        int fc = 0;
-        int color = color_of_turn(&g);
-        is_legal_move(&g, color, bx, by, flips, &fc);
-        apply_move_with_flips(&g, color, bx, by, flips, fc);
-        char m[8];
-        coords_to_notation(m, bx, by);
-        append_move_to_oftxt(&g, m);
-        printf("Engine plays %s\n", m);
+        *x = *y = -1;
     }
-    print_board(&g);
-    return 0;
 }
+//---------------------------------------------------------------------------
